@@ -69,6 +69,36 @@ final class ScriptTerminal: NSObject {
         return surfaceView?.surfaceModel?.ttyName ?? ""
     }
 
+    /// Exposed as the AppleScript `frame` property.
+    ///
+    /// Returns the terminal's position and size within its window, using
+    /// a top-left origin coordinate system (matching screen conventions).
+    @objc(frame)
+    var frame: NSDictionary {
+        guard NSApp.isAppleScriptEnabled else { return [:] }
+        guard let surfaceView, let window = surfaceView.window else { return [:] }
+
+        let winFrame = surfaceView.convert(surfaceView.bounds, to: nil)
+        let contentHeight = window.contentView?.frame.size.height ?? winFrame.maxY
+
+        return [
+            "x" as NSString: Int(winFrame.origin.x) as NSNumber,
+            "y" as NSString: Int(contentHeight - winFrame.origin.y - winFrame.size.height) as NSNumber,
+            "w" as NSString: Int(winFrame.size.width) as NSNumber,
+            "h" as NSString: Int(winFrame.size.height) as NSNumber,
+        ]
+    }
+
+    /// Exposed as the AppleScript `content` property.
+    ///
+    /// Returns the plain-text content of the terminal screen (visible area only).
+    /// Uses the same cached read path as accessibility, so it is cheap to call.
+    @objc(content)
+    var content: String {
+        guard NSApp.isAppleScriptEnabled else { return "" }
+        return surfaceView?.cachedScreenContents.get() ?? ""
+    }
+
     /// Used by command handling (`perform action ... on <terminal>`).
     func perform(action: String) -> Bool {
         guard NSApp.isAppleScriptEnabled else { return false }

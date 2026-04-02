@@ -1,0 +1,792 @@
+#!/usr/bin/env python3
+"""
+ghostty-it2: Ghostty shim for the it2 CLI interface used by Claude Code.
+
+Maps it2 session commands to Ghostty AppleScript calls.
+Uses Ghostty's native terminal IDs directly as session IDs — no mapping needed.
+"""
+import argparse
+import io
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+
+_LOG_FILE = Path.home() / ".local/state/ghostty/it2-trace.log"
+
+
+def _trace(msg):
+    """Append a timestamped line to the trace log (noop if log dir missing)."""
+    try:
+        _LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with _LOG_FILE.open("a") as f:
+            f.write(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] {msg}\n")
+    except OSError:
+        pass
+
+
+def run_applescript(script):
+    return subprocess.run(
+        ["osascript", "-e", script],
+        capture_output=True, text=True,
+    )
+
+
+def _applescript_target(session_id):
+    """Return an AppleScript expression for the target terminal."""
+    if session_id:
+        return f'first terminal whose id is "{session_id}"'
+    return 'focused terminal of selected tab of front window'
+
+
+def _escape_applescript(text):
+    """Escape a string for use inside an AppleScript double-quoted literal."""
+    return text.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _applescript_string_literal(text):
+    """Return an AppleScript expression that evaluates to the given text.
+
+    Single-line strings are returned as double-quoted literals.
+    Multi-line strings use 'linefeed' concatenation.
+    """
+    parts = text.split("\n")
+    escaped_parts = [p.replace("\\", "\\\\").replace('"', '\\"') for p in parts]
+    if len(escaped_parts) == 1:
+        return f'"{escaped_parts[0]}"'
+    return ' & linefeed & '.join(f'"{p}"' for p in escaped_parts)
+
+
+def _applescript_action_text(text):
+    """Return a perform action string for the text: action.
+
+    Handles newlines by returning a list of action strings.
+    """
+    parts = text.split("\n")
+    escaped_parts = [p.replace("\\", "\\\\").replace('"', '\\"') for p in parts]
+    return escaped_parts
+
+
+def _run_and_check(script):
+    r = run_applescript(script)
+    if r.returncode != 0:
+        print(f"applescript error: {r.stderr.strip()}", file=sys.stderr)
+        sys.exit(1)
+    return r
+
+
+# ── subcommand handlers ─────────────────────────────────────────────
+
+def cmd_session_list(args):
+    if getattr(args, "json", False):
+        r = run_applescript('''
+set out to ""
+tell application "Ghostty"
+  repeat with w in (every window)
+    repeat with t in (every tab of w)
+      repeat with trm in (every terminal of t)
+        if out is not "" then set out to out & linefeed
+        set out to out & (id of trm) & "\t" & (name of trm) & "\t" & (working directory of trm)
+      end repeat
+    end repeat
+  end repeat
+end tell
+return out''')
+        if r.returncode != 0:
+            sys.exit(1)
+        sessions = []
+        for line in r.stdout.strip().splitlines():
+            if not line:
+                continue
+            parts = line.split("\t", 2)
+            sessions.append({
+                "session_id": parts[0],
+                "name": parts[1] if len(parts) > 1 else "",
+                "working_directory": parts[2] if len(parts) > 2 else "",
+            })
+        print(json.dumps(sessions, indent=2))
+    else:
+        r = run_applescript('''
+set allIds to {}
+tell application "Ghostty"
+  repeat with w in (every window)
+    repeat with t in (every tab of w)
+      repeat with trm in (every terminal of t)
+        set end of allIds to id of trm
+      end repeat
+    end repeat
+  end repeat
+end tell
+set AppleScript's text item delimiters to linefeed
+set output to allIds as text
+set AppleScript's text item delimiters to ""
+return output''')
+        if r.returncode != 0:
+            sys.exit(1)
+        print("Session ID")
+        output = r.stdout.strip()
+        if output:
+            print(output)
+
+
+def cmd_session_split(args):
+    direction = "right" if args.vertical else "down"
+    target = (f'first terminal whose id is "{args.session}"'
+              if args.session
+              else 'focused terminal of selected tab of front window')
+
+    profile = getattr(args, "profile", None)
+    if profile:
+        profile_escaped = _escape_applescript(profile)
+        script = f'''
+tell application "Ghostty"
+  set sourceT to {target}
+  set cfg to new surface configuration
+  set command of cfg to "{profile_escaped}"
+  set newT to split sourceT direction {direction} with configuration cfg
+  perform action "equalize_splits" on newT
+  return id of newT
+end tell'''
+    else:
+        script = f'''
+tell application "Ghostty"
+  set sourceT to {target}
+  set newT to split sourceT direction {direction}
+  perform action "equalize_splits" on newT
+  return id of newT
+end tell'''
+
+    r = _run_and_check(script)
+    terminal_id = r.stdout.strip()
+    if not terminal_id:
+        print("unexpected empty terminal id", file=sys.stderr)
+        sys.exit(1)
+    print(f"Created new pane: {terminal_id}")
+
+
+def cmd_session_run(args):
+    cmd = " ".join(args.command)
+    if not cmd.strip():
+        print("error: no command specified", file=sys.stderr)
+        sys.exit(1)
+    cmd_escaped = _escape_applescript(cmd)
+    target = _applescript_target(args.session)
+
+    script = f'''
+tell application "Ghostty"
+  set t to {target}
+  input text "{cmd_escaped}" to t
+  delay 0.5
+  send key "enter" to t
+end tell'''
+    _run_and_check(script)
+
+
+def cmd_session_send(args):
+    text = " ".join(args.text)
+    text_escaped = _escape_applescript(text)
+
+    if args.all:
+        script = f'''
+tell application "Ghostty"
+  repeat with t in terminals
+    input text "{text_escaped}" to t
+  end repeat
+end tell'''
+    else:
+        target = _applescript_target(args.session)
+        script = f'''
+tell application "Ghostty"
+  input text "{text_escaped}" to ({target})
+end tell'''
+    _run_and_check(script)
+
+
+def cmd_session_clear(args):
+    target = _applescript_target(args.session)
+    script = f'''
+tell application "Ghostty"
+  set t to {target}
+  send key "l" modifiers "control" action press to t
+  delay 0.05
+  send key "l" modifiers "control" action release to t
+end tell'''
+    _run_and_check(script)
+
+
+def cmd_session_focus(args):
+    session_id = args.session or args.session_id
+    if not session_id:
+        sys.exit(0)
+
+    script = f'''
+tell application "Ghostty"
+  set t to first terminal whose id is "{session_id}"
+  focus t
+end tell'''
+    _run_and_check(script)
+
+
+def cmd_session_close(args):
+    if not args.session:
+        sys.exit(0)
+
+    script = f'''
+tell application "Ghostty"
+  close (first terminal whose id is "{args.session}")
+end tell'''
+    run_applescript(script)
+
+
+
+def _collect_terminals(node):
+    """Flatten tree into terminal list."""
+    if node.get("type") == "terminal":
+        return [node]
+    out = []
+    for child in node.get("children", []):
+        out.extend(_collect_terminals(child))
+    return out
+
+
+def _border_char(up, down, left, right):
+    key = (up, down, left, right)
+    return {
+        (1,1,1,1): '┼', (1,1,1,0): '┤', (1,1,0,1): '├', (1,1,0,0): '│',
+        (1,0,1,1): '┴', (1,0,1,0): '┘', (1,0,0,1): '└', (1,0,0,0): '│',
+        (0,1,1,1): '┬', (0,1,1,0): '┐', (0,1,0,1): '┌', (0,1,0,0): '│',
+        (0,0,1,1): '─', (0,0,1,0): '─', (0,0,0,1): '─',
+    }.get(key, ' ')
+
+
+def _render_box_layout(terminals, self_id=None, width=60):
+    """Render terminals as box-drawing grid from frame coordinates."""
+    if not terminals:
+        return ""
+    if len(terminals) == 1:
+        t = terminals[0]
+        is_self = self_id and t.get("id") == self_id
+        label = "[T1]" if is_self else "T1"
+        inner = width - 2
+        pad_line = f"│{' ' * inner}│"
+        label_line = f"│{label:^{inner}}│"
+        box = f"┌{'─' * inner}┐\n{pad_line}\n{label_line}\n{pad_line}\n└{'─' * inner}┘"
+        return box
+
+    # Collect boundary coordinates from frames, merging near-duplicates
+    def _merge_coords(vals, tol=5):
+        result = []
+        for v in sorted(vals):
+            if result and abs(v - result[-1]) <= tol:
+                result[-1] = (result[-1] + v) // 2  # merge to midpoint
+            else:
+                result.append(v)
+        return result
+
+    xs = _merge_coords(
+        [t["frame"]["x"] for t in terminals] +
+        [t["frame"]["x"] + t["frame"]["w"] for t in terminals])
+    ys = _merge_coords(
+        [t["frame"]["y"] for t in terminals] +
+        [t["frame"]["y"] + t["frame"]["h"] for t in terminals])
+
+    n_cols = len(xs) - 1
+    n_rows = len(ys) - 1
+
+    # Build logical cell ownership: cell[r][c] = terminal index
+    cell = [[0] * n_cols for _ in range(n_rows)]
+    for t in terminals:
+        f = t["frame"]
+        for r in range(n_rows):
+            for c in range(n_cols):
+                mx = (xs[c] + xs[c + 1]) / 2
+                my = (ys[r] + ys[r + 1]) / 2
+                if f["x"] <= mx < f["x"] + f["w"] and f["y"] <= my < f["y"] + f["h"]:
+                    cell[r][c] = t["index"]
+
+    # Character widths proportional to pixel widths
+    total_px_w = xs[-1] - xs[0]
+    total_px_h = ys[-1] - ys[0]
+    avail_w = width - n_cols - 1
+    col_w = []
+    for c in range(n_cols):
+        cw = max(4, round(avail_w * (xs[c + 1] - xs[c]) / total_px_w))
+        col_w.append(cw)
+    # Adjust to exact width
+    diff = avail_w - sum(col_w)
+    for i in range(abs(diff)):
+        col_w[i % n_cols] += 1 if diff > 0 else -1
+
+    # Row heights proportional to pixel heights, compact
+    target_h = max(round(width * total_px_h / total_px_w / 3), n_rows * 2)
+    avail_h = max(target_h - n_rows - 1, n_rows * 3)
+    row_h = []
+    for r in range(n_rows):
+        rh = max(3, round(avail_h * (ys[r + 1] - ys[r]) / total_px_h))
+        row_h.append(rh)
+    while sum(row_h) > avail_h and max(row_h) > 3:
+        tallest = row_h.index(max(row_h))
+        row_h[tallest] -= 1
+
+    # Character positions of grid lines
+    col_pos = [0]
+    for c in range(n_cols):
+        col_pos.append(col_pos[-1] + 1 + col_w[c])
+    row_pos = [0]
+    for r in range(n_rows):
+        row_pos.append(row_pos[-1] + 1 + row_h[r])
+
+    total_cw = col_pos[-1] + 1
+    total_ch = row_pos[-1] + 1
+    grid = [[' '] * total_cw for _ in range(total_ch)]
+
+    # Draw horizontal borders
+    for r in range(n_rows + 1):
+        y = row_pos[r]
+        for c in range(n_cols):
+            above = cell[r - 1][c] if r > 0 else -1
+            below = cell[r][c] if r < n_rows else -1
+            if above != below:
+                for x in range(col_pos[c] + 1, col_pos[c + 1]):
+                    grid[y][x] = '─'
+
+    # Draw vertical borders
+    for c in range(n_cols + 1):
+        x = col_pos[c]
+        for r in range(n_rows):
+            left = cell[r][c - 1] if c > 0 else -1
+            right = cell[r][c] if c < n_cols else -1
+            if left != right:
+                for y in range(row_pos[r] + 1, row_pos[r + 1]):
+                    grid[y][x] = '│'
+
+    # Draw intersections
+    for r in range(n_rows + 1):
+        for c in range(n_cols + 1):
+            tl = cell[r - 1][c - 1] if r > 0 and c > 0 else -1
+            tr = cell[r - 1][c] if r > 0 and c < n_cols else -1
+            bl = cell[r][c - 1] if r < n_rows and c > 0 else -1
+            br = cell[r][c] if r < n_rows and c < n_cols else -1
+            up = int(tl != tr)
+            down = int(bl != br)
+            left = int(tl != bl)
+            right = int(tr != br)
+            if up or down or left or right:
+                grid[row_pos[r]][col_pos[c]] = _border_char(up, down, left, right)
+
+    # Center "T{n}" labels in each terminal's region
+    for t in terminals:
+        idx = t["index"]
+        cells_rc = [(r, c) for r in range(n_rows) for c in range(n_cols) if cell[r][c] == idx]
+        if not cells_rc:
+            continue
+        min_c = min(c for _, c in cells_rc)
+        max_c = max(c for _, c in cells_rc)
+        min_r = min(r for r, _ in cells_rc)
+        max_r = max(r for r, _ in cells_rc)
+
+        cx1 = col_pos[min_c] + 1
+        cx2 = col_pos[max_c + 1]
+        cy1 = row_pos[min_r] + 1
+        cy2 = row_pos[max_r + 1]
+
+        is_self = self_id and t.get("id") == self_id
+        label = f"[T{idx}]" if is_self else f"T{idx}"
+        lx = cx1 + (cx2 - cx1 - len(label)) // 2
+        ly = cy1 + (cy2 - cy1) // 2
+        for i, ch in enumerate(label):
+            if 0 <= ly < total_ch and 0 <= lx + i < total_cw:
+                grid[ly][lx + i] = ch
+
+    lines = [''.join(row).rstrip() for row in grid]
+    while lines and not lines[-1]:
+        lines.pop()
+    return '\n'.join(lines)
+
+
+def _render_terminal_details(terminals, self_id=None):
+    """Render terminal detail lines below the box layout."""
+    DIM = "\033[2m"
+    RST = "\033[0m"
+    you_mark = "  ◀ you"
+    lines = []
+    for i, t in enumerate(terminals):
+        idx = t.get("index", 0)
+        tid = t.get("id", "")
+        name = t.get("name", "")
+        cwd = t.get("cwd", "")
+        is_self = self_id and tid == self_id
+        cwd_short = "~/" + "/".join(cwd.split("/")[3:]) if cwd.startswith("/Users/") else cwd
+
+        if i > 0:
+            lines.append("")
+        mark = you_mark if is_self else ""
+        lines.append(f" T{idx}  {tid}{mark}")
+        if name:
+            lines.append(f"     {DIM}{name}{RST}")
+        if cwd_short:
+            lines.append(f"     {DIM}{cwd_short}{RST}")
+    return "\n".join(lines)
+
+
+def _find_terminal_in_tree(tree, terminal_id):
+    """Check if tree contains the given terminal ID."""
+    if not tree:
+        return False
+    if tree.get("type") == "terminal" and tree.get("id") == terminal_id:
+        return True
+    for child in tree.get("children", []):
+        if _find_terminal_in_tree(child, terminal_id):
+            return True
+    return False
+
+
+def _get_layout_data(tab=None, self_id=None):
+    """Get layout data via AppleScript (frame property on each terminal)."""
+    r = run_applescript('''
+tell application "Ghostty"
+  set tabCount to count of tabs of front window
+  set selIdx to index of selected tab of front window
+  set out to ""
+  repeat with t in (every tab of front window)
+    set tIdx to index of t
+    set tName to name of t
+    repeat with trm in (every terminal of t)
+      set f to frame of trm
+      if out is not "" then set out to out & linefeed
+      set out to out & tIdx & "\\t" & tName & "\\t" & (id of trm) & "\\t" & (name of trm) & "\\t" & (working directory of trm) & "\\t" & (x of f) & "\\t" & (y of f) & "\\t" & (w of f) & "\\t" & (h of f)
+    end repeat
+  end repeat
+  return (tabCount as text) & linefeed & (selIdx as text) & linefeed & out
+end tell''')
+    if r.returncode != 0:
+        return None
+
+    lines = r.stdout.strip().splitlines()
+    if len(lines) < 2:
+        return None
+
+    tab_count = int(lines[0])
+    selected_tab = int(lines[1])
+
+    # Group terminals by tab
+    tabs = {}
+    for line in lines[2:]:
+        parts = line.split("\t", 8)
+        if len(parts) < 9:
+            continue
+        t_idx = int(parts[0])
+        t_name = parts[1]
+        if t_idx not in tabs:
+            tabs[t_idx] = {"index": t_idx, "title": t_name, "terminals": []}
+        tabs[t_idx]["terminals"].append({
+            "id": parts[2],
+            "name": parts[3],
+            "cwd": parts[4],
+            "frame": {
+                "x": int(parts[5]), "y": int(parts[6]),
+                "w": int(parts[7]), "h": int(parts[8]),
+            },
+        })
+
+    # Determine which tab to show
+    tab_idx = tab
+    if tab_idx is None and self_id:
+        for t in tabs.values():
+            if any(trm["id"] == self_id for trm in t["terminals"]):
+                tab_idx = t["index"]
+                break
+    if tab_idx is None:
+        tab_idx = selected_tab
+
+    tab_info = tabs.get(tab_idx)
+    if not tab_info and tabs:
+        tab_info = next(iter(tabs.values()))
+    if not tab_info:
+        return None
+
+    # Build terminal list with index
+    terminals = []
+    for i, trm in enumerate(tab_info["terminals"], 1):
+        trm["index"] = i
+        trm["type"] = "terminal"
+        terminals.append(trm)
+
+    return {
+        "tab_index": tab_info["index"],
+        "tab_count": tab_count,
+        "tab_name": tab_info.get("title", ""),
+        "pane_count": len(terminals),
+        "tree": {"type": "split", "children": terminals} if len(terminals) > 1 else terminals[0] if terminals else {},
+    }
+
+
+def cmd_session_layout(args):
+    raw = os.environ.get("ITERM_SESSION_ID", "")
+    self_id = raw.split(":", 1)[1] if ":" in raw else ""
+
+    data = _get_layout_data(args.tab, self_id=self_id or None)
+    if not data:
+        print("layout query failed", file=sys.stderr)
+        sys.exit(1)
+
+    terminals = _collect_terminals(data["tree"])
+    tab_idx = data.get("tab_index", data.get("selected_tab", 1))
+    tab_count = data.get("tab_count", 1)
+    tab_name = data.get("tab_name", data.get("title", ""))
+    pane_count = data.get("pane_count", len(terminals))
+
+    print(f"Tab {tab_idx}/{tab_count}  {tab_name}  [{pane_count} panes]")
+    if terminals:
+        print(_render_box_layout(terminals, self_id=self_id or None))
+        print()
+        print(_render_terminal_details(terminals, self_id=self_id or None))
+
+
+def cmd_session_tabs(args):
+    raw = os.environ.get("ITERM_SESSION_ID", "")
+    my_id = raw.split(":", 1)[1] if ":" in raw else ""
+
+    r = run_applescript(f'''
+tell application "Ghostty"
+  set tabCount to count of tabs of front window
+  set selIdx to index of selected tab of front window
+  set myTabIdx to 0
+  if "{my_id}" is not "" then
+    repeat with wi in (every window)
+      repeat with t in (every tab of wi)
+        repeat with trm in (every terminal of t)
+          if id of trm is "{my_id}" then
+            set myTabIdx to index of t
+            exit repeat
+          end if
+        end repeat
+        if myTabIdx > 0 then exit repeat
+      end repeat
+      if myTabIdx > 0 then exit repeat
+    end repeat
+  end if
+  set out to ""
+  repeat with i from 1 to tabCount
+    set t to tab i of front window
+    set tName to name of t
+    set termCount to count of terminals of t
+    set suffix to ""
+    if i is selIdx and i is myTabIdx then
+      set suffix to " (selected, current)"
+    else if i is selIdx then
+      set suffix to " (selected)"
+    else if i is myTabIdx then
+      set suffix to " (current)"
+    end if
+    set ln to i & "\\t" & tName & "\\t" & termCount & "\\t" & suffix
+    if i > 1 then set out to out & linefeed
+    set out to out & ln
+  end repeat
+  return out
+end tell''')
+    if r.returncode != 0:
+        print(f"applescript error: {r.stderr.strip()}", file=sys.stderr)
+        sys.exit(1)
+    output = r.stdout.strip()
+    if not output:
+        return
+
+    for line in output.splitlines():
+        parts = line.split("\t")
+        tab_idx = int(parts[0].split(".")[0].strip())
+        tab_name = parts[1] if len(parts) > 1 else ""
+        count = int(parts[2]) if len(parts) > 2 else 0
+        suffix = parts[3].strip() if len(parts) > 3 else ""
+
+        line = f"{tab_idx}. {tab_name} ({count} terminals)"
+        if suffix:
+            line += f" {suffix}"
+        print(line)
+
+
+def cmd_session_read(args):
+    target = _applescript_target(args.session)
+    script = f'''
+tell application "Ghostty"
+  set t to {target}
+  return content of t
+end tell'''
+    r = _run_and_check(script)
+    lines = r.stdout.rstrip("\n").splitlines()
+    n = getattr(args, "lines", None)
+    if n is not None:
+        lines = lines[-n:]
+    print("\n".join(lines))
+
+
+def cmd_session_capture(args):
+    target = _applescript_target(args.session)
+    script = f'''
+tell application "Ghostty"
+  set t to {target}
+  return content of t
+end tell'''
+    r = _run_and_check(script)
+    lines = r.stdout.rstrip("\n").splitlines()
+    with open(args.output, "w") as f:
+        f.write("\n".join(lines))
+    print(f"Captured to {args.output}")
+
+
+def cmd_session_set_name(args):
+    target = _applescript_target(args.session)
+    name_escaped = _escape_applescript(args.name)
+    script = f'''
+tell application "Ghostty"
+  set t to {target}
+  perform action "set_surface_title:{name_escaped}" on t
+end tell'''
+    _run_and_check(script)
+
+
+def cmd_session_copy(args):
+    target = _applescript_target(args.session)
+    script = f'''
+tell application "Ghostty"
+  set t to {target}
+  perform action "copy_to_clipboard" on t
+end tell'''
+    _run_and_check(script)
+
+
+# ── CLI definition ───────────────────────────────────────────────────
+
+def build_parser():
+    top = argparse.ArgumentParser(prog="it2", description="Ghostty terminal session control")
+    sp = top.add_subparsers(dest="group", help="command group")
+    session = sp.add_parser("session", help="manage terminal sessions")
+    sub = session.add_subparsers(dest="subcmd", help="session subcommand")
+
+    # list
+    p = sub.add_parser("list", help="list all terminal session IDs")
+    p.add_argument("--json", action="store_true", help="output as JSON")
+    p.set_defaults(func=cmd_session_list)
+
+    # split
+    p = sub.add_parser("split", help="split a terminal pane")
+    p.add_argument("-v", "--vertical", action="store_true", help="split vertically (right)")
+    p.add_argument("-s", "--session", metavar="ID", help="source terminal (default: focused)")
+    p.add_argument("-p", "--profile", metavar="CMD", help="command to run in new pane")
+    p.set_defaults(func=cmd_session_split)
+
+    # run
+    p = sub.add_parser("run", help="send a command and press Enter")
+    p.add_argument("-s", "--session", metavar="ID", help="target terminal (default: focused)")
+    p.add_argument("command", nargs=argparse.REMAINDER, help="command to execute")
+    p.set_defaults(func=cmd_session_run)
+
+    # send
+    p = sub.add_parser("send", help="send text without pressing Enter")
+    p.add_argument("-s", "--session", metavar="ID", help="target terminal (default: focused)")
+    p.add_argument("-a", "--all", action="store_true", help="send to all terminals")
+    p.add_argument("text", nargs=argparse.REMAINDER, help="text to send")
+    p.set_defaults(func=cmd_session_send)
+
+    # focus
+    p = sub.add_parser("focus", help="focus a terminal pane")
+    p.add_argument("-s", "--session", metavar="ID", help="terminal to focus")
+    p.add_argument("session_id", nargs="?", help="terminal to focus (positional)")
+    p.set_defaults(func=cmd_session_focus)
+
+    # close
+    p = sub.add_parser("close", help="close a terminal pane")
+    p.add_argument("-f", "--force", action="store_true", help="force close (accepted but ignored)")
+    p.add_argument("-s", "--session", metavar="ID", help="terminal to close")
+    p.set_defaults(func=cmd_session_close)
+
+    # clear
+    p = sub.add_parser("clear", help="clear the terminal screen")
+    p.add_argument("-s", "--session", metavar="ID", help="target terminal (default: focused)")
+    p.set_defaults(func=cmd_session_clear)
+
+    # tabs
+    p = sub.add_parser("tabs", help="list all tabs in frontmost window")
+    p.set_defaults(func=cmd_session_tabs)
+
+    # layout
+    p = sub.add_parser("layout", help="show split layout of a tab")
+    p.add_argument("--tab", "-t", type=int, metavar="N", default=None,
+                   help="tab index (1-based, default: selected tab)")
+    p.add_argument("--verbose", "-v", action="store_true",
+                   help="show terminal IDs")
+    p.set_defaults(func=cmd_session_layout)
+
+    # read
+    p = sub.add_parser("read", help="display screen contents")
+    p.add_argument("-s", "--session", metavar="ID", help="target terminal (default: focused)")
+    p.add_argument("-n", "--lines", type=int, metavar="N", help="number of lines to read")
+    p.set_defaults(func=cmd_session_read)
+
+    # capture
+    p = sub.add_parser("capture", help="capture screen to file")
+    p.add_argument("-s", "--session", metavar="ID", help="target terminal (default: focused)")
+    p.add_argument("-o", "--output", required=True, metavar="FILE", help="output file path")
+    p.add_argument("--history", action="store_true", help="include scrollback history")
+    p.set_defaults(func=cmd_session_capture)
+
+    # set-name
+    p = sub.add_parser("set-name", help="set session name")
+    p.add_argument("-s", "--session", metavar="ID", help="target terminal (default: focused)")
+    p.add_argument("name", help="new session name")
+    p.set_defaults(func=cmd_session_set_name)
+
+    # copy
+    p = sub.add_parser("copy", help="copy selection to clipboard")
+    p.add_argument("-s", "--session", metavar="ID", help="target terminal (default: focused)")
+    p.set_defaults(func=cmd_session_copy)
+
+    return top
+
+
+def main():
+    raw_args = sys.argv[1:]
+    _trace(f">>> it2 {' '.join(raw_args)}  (pid={os.getpid()})")
+
+    parser = build_parser()
+    args = parser.parse_args(raw_args)
+
+    if not hasattr(args, "func"):
+        parser.parse_args(raw_args + ["--help"])
+        return
+
+    # Capture stdout/stderr for trace logging
+    old_stdout, old_stderr = sys.stdout, sys.stderr
+    sys.stdout = io.StringIO()
+    sys.stderr = io.StringIO()
+
+    exit_code = 0
+    try:
+        args.func(args)
+    except SystemExit as e:
+        exit_code = e.code if e.code is not None else 0
+
+    out_val = sys.stdout.getvalue()
+    err_val = sys.stderr.getvalue()
+    sys.stdout, sys.stderr = old_stdout, old_stderr
+
+    if out_val:
+        sys.stdout.write(out_val)
+    if err_val:
+        sys.stderr.write(err_val)
+
+    if out_val.strip():
+        _trace(f"    stdout: {out_val.strip()}")
+    if err_val.strip():
+        _trace(f"    stderr: {err_val.strip()}")
+    _trace(f"<<< exit {exit_code}")
+
+    sys.exit(exit_code)
+
+
+if __name__ == "__main__":
+    main()

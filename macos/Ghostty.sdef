@@ -92,6 +92,10 @@
       <property name="working directory" code="Gwdr" type="text" access="r" description="Current working directory for the terminal process."/>
       <property name="pid" code="Gpid" type="integer" access="r" description="PID of the foreground process in this terminal."/>
       <property name="tty" code="Gtty" type="text" access="r" description="TTY device path for this terminal (e.g. /dev/ttys016)."/>
+      <property name="frame" code="GTfr" type="frame" access="r" description="Position and size of this terminal within its window (top-left origin).">
+        <cocoa key="frame"/>
+      </property>
+      <property name="content" code="GTco" type="text" access="r" description="Plain-text content of the terminal screen (visible area)."/>
       <responds-to command="split">
         <cocoa method="handleSplitCommand:"/>
       </responds-to>
@@ -122,6 +126,21 @@
       <property name="environment variables" code="GScE" description="Environment variables in KEY=VALUE format.">
         <type type="text" list="yes"/>
         <cocoa key="environmentVariables"/>
+      </property>
+    </record-type>
+
+    <record-type name="frame" code="GFrm" description="A rectangle describing position and size within a window.">
+      <property name="x" code="GFrX" type="integer" description="Horizontal position from left edge of window.">
+        <cocoa key="x"/>
+      </property>
+      <property name="y" code="GFrY" type="integer" description="Vertical position from top edge of window.">
+        <cocoa key="y"/>
+      </property>
+      <property name="w" code="GFrW" type="integer" description="Width in points.">
+        <cocoa key="w"/>
+      </property>
+      <property name="h" code="GFrH" type="integer" description="Height in points.">
+        <cocoa key="h"/>
       </property>
     </record-type>
 
