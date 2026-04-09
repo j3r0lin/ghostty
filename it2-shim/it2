@@ -170,9 +170,6 @@ end tell'''
 
 def cmd_session_run(args):
     cmd = " ".join(args.command)
-    if not cmd.strip():
-        print("error: no command specified", file=sys.stderr)
-        sys.exit(1)
     cmd_escaped = _escape_applescript(cmd)
     target = _applescript_target(args.session)
 
@@ -228,7 +225,7 @@ tell application "Ghostty"
   set t to first terminal whose id is "{session_id}"
   focus t
 end tell'''
-    _run_and_check(script)
+    run_applescript(script)
 
 
 def cmd_session_close(args):
@@ -613,8 +610,7 @@ def cmd_session_read(args):
     target = _applescript_target(args.session)
     script = f'''
 tell application "Ghostty"
-  set t to {target}
-  return content of t
+  content of ({target})
 end tell'''
     r = _run_and_check(script)
     lines = r.stdout.rstrip("\n").splitlines()
@@ -628,8 +624,7 @@ def cmd_session_capture(args):
     target = _applescript_target(args.session)
     script = f'''
 tell application "Ghostty"
-  set t to {target}
-  return content of t
+  content of ({target})
 end tell'''
     r = _run_and_check(script)
     lines = r.stdout.rstrip("\n").splitlines()
@@ -647,6 +642,71 @@ tell application "Ghostty"
   perform action "set_surface_title:{name_escaped}" on t
 end tell'''
     _run_and_check(script)
+
+
+def cmd_session_show(args):
+    raw = os.environ.get("ITERM_SESSION_ID", "")
+    self_id = args.session or (raw.split(":", 1)[1] if ":" in raw else "")
+    if not self_id:
+        print("no session specified and ITERM_SESSION_ID not set", file=sys.stderr)
+        sys.exit(1)
+
+    target = _applescript_target(self_id)
+    r = run_applescript(f'''
+tell application "Ghostty"
+  set t to {target}
+  set tId to id of t
+  set tName to name of t
+  set tCwd to working directory of t
+  set f to frame of t
+  -- find tab index and pane position
+  set tabIdx to 0
+  set paneIdx to 0
+  set paneCount to 0
+  repeat with wi in (every window)
+    repeat with tb in (every tab of wi)
+      set terms to every terminal of tb
+      set termCount to count of terms
+      repeat with j from 1 to termCount
+        if id of item j of terms is tId then
+          set tabIdx to index of tb
+          set paneIdx to j
+          set paneCount to termCount
+        end if
+      end repeat
+    end repeat
+  end repeat
+  return tId & "\\n" & tName & "\\n" & tCwd & "\\n" & (x of f) & "," & (y of f) & "," & (w of f) & "," & (h of f) & "\\n" & tabIdx & "\\n" & paneIdx & "\\n" & paneCount
+end tell''')
+    if r.returncode != 0:
+        print(f"applescript error: {r.stderr.strip()}", file=sys.stderr)
+        sys.exit(1)
+
+    lines = r.stdout.strip().splitlines()
+    if len(lines) < 7:
+        print("unexpected output", file=sys.stderr)
+        sys.exit(1)
+
+    tid, name, cwd, frame, tab_idx, pane_idx, pane_count = lines[:7]
+
+    if getattr(args, "json", False):
+        fx, fy, fw, fh = frame.split(",")
+        print(json.dumps({
+            "session_id": tid,
+            "name": name,
+            "working_directory": cwd,
+            "frame": {"x": int(fx), "y": int(fy), "w": int(fw), "h": int(fh)},
+            "tab": int(tab_idx),
+            "pane": int(pane_idx),
+            "pane_count": int(pane_count),
+        }, indent=2))
+    else:
+        cwd_short = "~/" + "/".join(cwd.split("/")[3:]) if cwd.startswith("/Users/") else cwd
+        print(f"Session:  {tid}")
+        if name:
+            print(f"Name:     {name}")
+        print(f"CWD:      {cwd_short}")
+        print(f"Tab:      {tab_idx}  Pane: {pane_idx}/{pane_count}")
 
 
 def cmd_session_copy(args):
@@ -720,6 +780,12 @@ def build_parser():
     p.add_argument("--verbose", "-v", action="store_true",
                    help="show terminal IDs")
     p.set_defaults(func=cmd_session_layout)
+
+    # show
+    p = sub.add_parser("show", help="show current session info")
+    p.add_argument("-s", "--session", metavar="ID", help="target terminal (default: current)")
+    p.add_argument("--json", action="store_true", help="output as JSON")
+    p.set_defaults(func=cmd_session_show)
 
     # read
     p = sub.add_parser("read", help="display screen contents")
