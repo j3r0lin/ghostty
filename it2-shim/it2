@@ -36,10 +36,17 @@ def run_applescript(script):
     )
 
 
+def _self_session_id():
+    """Extract terminal ID from ITERM_SESSION_ID environment variable."""
+    raw = os.environ.get("ITERM_SESSION_ID", "")
+    return raw.split(":", 1)[1] if ":" in raw else ""
+
+
 def _applescript_target(session_id):
     """Return an AppleScript expression for the target terminal."""
-    if session_id:
-        return f'first terminal whose id is "{session_id}"'
+    sid = session_id or _self_session_id()
+    if sid:
+        return f'first terminal whose id is "{sid}"'
     return 'focused terminal of selected tab of front window'
 
 
@@ -71,10 +78,24 @@ def _applescript_action_text(text):
     return escaped_parts
 
 
+def _friendly_error(stderr):
+    """Return a user-friendly error message from AppleScript stderr, or None."""
+    err = stderr.strip()
+    if "(-1719)" in err or "(-1728)" in err:
+        marker = 'whose id = "'
+        if marker in err:
+            start = err.index(marker) + len(marker)
+            end = err.index('"', start)
+            return f"session not found: {err[start:end]}\nUse 'it2 session list' to see available sessions."
+        return "target terminal not found"
+    return None
+
+
 def _run_and_check(script):
     r = run_applescript(script)
     if r.returncode != 0:
-        print(f"applescript error: {r.stderr.strip()}", file=sys.stderr)
+        msg = _friendly_error(r.stderr) or f"applescript error: {r.stderr.strip()}"
+        print(msg, file=sys.stderr)
         sys.exit(1)
     return r
 
@@ -135,9 +156,7 @@ return output''')
 
 def cmd_session_split(args):
     direction = "right" if args.vertical else "down"
-    target = (f'first terminal whose id is "{args.session}"'
-              if args.session
-              else 'focused terminal of selected tab of front window')
+    target = _applescript_target(args.session)
 
     profile = getattr(args, "profile", None)
     if profile:
@@ -149,6 +168,7 @@ tell application "Ghostty"
   set command of cfg to "{profile_escaped}"
   set newT to split sourceT direction {direction} with configuration cfg
   perform action "equalize_splits" on newT
+  {'focus newT' if args.focus else 'focus sourceT'}
   return id of newT
 end tell'''
     else:
@@ -157,6 +177,7 @@ tell application "Ghostty"
   set sourceT to {target}
   set newT to split sourceT direction {direction}
   perform action "equalize_splits" on newT
+  {'focus newT' if args.focus else 'focus sourceT'}
   return id of newT
 end tell'''
 
@@ -523,8 +544,7 @@ end tell''')
 
 
 def cmd_session_layout(args):
-    raw = os.environ.get("ITERM_SESSION_ID", "")
-    self_id = raw.split(":", 1)[1] if ":" in raw else ""
+    self_id = _self_session_id()
 
     data = _get_layout_data(args.tab, self_id=self_id or None)
     if not data:
@@ -545,8 +565,7 @@ def cmd_session_layout(args):
 
 
 def cmd_session_tabs(args):
-    raw = os.environ.get("ITERM_SESSION_ID", "")
-    my_id = raw.split(":", 1)[1] if ":" in raw else ""
+    my_id = _self_session_id()
 
     r = run_applescript(f'''
 tell application "Ghostty"
@@ -645,8 +664,7 @@ end tell'''
 
 
 def cmd_session_show(args):
-    raw = os.environ.get("ITERM_SESSION_ID", "")
-    self_id = args.session or (raw.split(":", 1)[1] if ":" in raw else "")
+    self_id = args.session or _self_session_id()
     if not self_id:
         print("no session specified and ITERM_SESSION_ID not set", file=sys.stderr)
         sys.exit(1)
@@ -679,7 +697,8 @@ tell application "Ghostty"
   return tId & "\\n" & tName & "\\n" & tCwd & "\\n" & (x of f) & "," & (y of f) & "," & (w of f) & "," & (h of f) & "\\n" & tabIdx & "\\n" & paneIdx & "\\n" & paneCount
 end tell''')
     if r.returncode != 0:
-        print(f"applescript error: {r.stderr.strip()}", file=sys.stderr)
+        msg = _friendly_error(r.stderr) or f"applescript error: {r.stderr.strip()}"
+        print(msg, file=sys.stderr)
         sys.exit(1)
 
     lines = r.stdout.strip().splitlines()
@@ -737,6 +756,7 @@ def build_parser():
     p.add_argument("-v", "--vertical", action="store_true", help="split vertically (right)")
     p.add_argument("-s", "--session", metavar="ID", help="source terminal (default: focused)")
     p.add_argument("-p", "--profile", metavar="CMD", help="command to run in new pane")
+    p.add_argument("--focus", action="store_true", help="focus the new pane after split")
     p.set_defaults(func=cmd_session_split)
 
     # run
