@@ -68,6 +68,73 @@ class TerminalWindow: NSWindow {
         }
     }
 
+    /// Whether a progress indicator is shown on this window's tab.
+    var showTabProgress: Bool = false {
+        didSet {
+            guard showTabProgress != oldValue else { return }
+            if showTabProgress {
+                attachTabProgressBar()
+            } else {
+                removeTabProgressBar()
+            }
+        }
+    }
+
+    private var tabProgressLayer: TabProgressBarLayer?
+
+    private func attachTabProgressBar() {
+        guard tabProgressLayer == nil else { return }
+        guard let tabButton = findOwnTabButton() else { return }
+
+        let layer = TabProgressBarLayer()
+        let height: CGFloat = 2
+        layer.frame = CGRect(x: 0, y: 0, width: tabButton.bounds.width, height: height)
+        layer.autoresizingMask = [.layerWidthSizable]
+
+        tabButton.wantsLayer = true
+        tabButton.layer?.addSublayer(layer)
+        layer.startBouncing()
+        tabProgressLayer = layer
+    }
+
+    private func removeTabProgressBar() {
+        tabProgressLayer?.removeFromSuperlayer()
+        tabProgressLayer = nil
+    }
+
+    private func findOwnTabButton() -> NSView? {
+        guard let closeButton = standardWindowButton(.closeButton),
+              let titlebarContainer = closeButton.superview?.superview else { return nil }
+
+        var current: NSView? = titlebarContainer
+        while let v = current {
+            if v.className == "NSTitlebarContainerView" || v.className == "NSTitlebarView" {
+                return findDescendants(of: v, className: "NSTabButton")
+                    .first { tabButton in
+                        // NSTabButton for the current window can be identified by
+                        // checking if it's in a "selected" state when this window is key.
+                        if let button = tabButton as? NSButton {
+                            return button.title == self.title
+                        }
+                        return false
+                    }
+            }
+            current = v.superview
+        }
+        return nil
+    }
+
+    private func findDescendants(of view: NSView, className: String) -> [NSView] {
+        var results: [NSView] = []
+        for subview in view.subviews {
+            if subview.className == className {
+                results.append(subview)
+            }
+            results.append(contentsOf: findDescendants(of: subview, className: className))
+        }
+        return results
+    }
+
     // MARK: NSWindow Overrides
 
     override var toolbar: NSToolbar? {
@@ -842,5 +909,58 @@ extension TerminalWindow: TabTitleEditorDelegate {
               let focusedSurface = controller.focusedSurface
         else { return }
         makeFirstResponder(focusedSurface)
+    }
+}
+
+// MARK: - Tab Progress Bar
+
+/// A Core Animation layer that renders a bouncing indeterminate progress bar,
+/// intended to be attached to the bottom of an NSTabButton.
+class TabProgressBarLayer: CALayer {
+    private let barLayer = CALayer()
+    private let bgLayer = CALayer()
+
+    override init() {
+        super.init()
+        setup()
+    }
+
+    override init(layer: Any) {
+        super.init(layer: layer)
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setup()
+    }
+
+    private func setup() {
+        let color = NSColor.controlAccentColor
+        bgLayer.backgroundColor = color.withAlphaComponent(0.15).cgColor
+        addSublayer(bgLayer)
+        barLayer.backgroundColor = color.cgColor
+        barLayer.cornerRadius = 1
+        addSublayer(barLayer)
+    }
+
+    override func layoutSublayers() {
+        super.layoutSublayers()
+        bgLayer.frame = bounds
+    }
+
+    func startBouncing() {
+        barLayer.removeAllAnimations()
+        let barWidth = max(bounds.width * 0.25, 20)
+        let maxX = max(bounds.width - barWidth, 0)
+        barLayer.frame = CGRect(x: 0, y: 0, width: barWidth, height: bounds.height)
+
+        let anim = CABasicAnimation(keyPath: "position.x")
+        anim.fromValue = barWidth / 2
+        anim.toValue = maxX + barWidth / 2
+        anim.duration = 1.2
+        anim.autoreverses = true
+        anim.repeatCount = .infinity
+        anim.timingFunction = CAMediaTimingFunction(controlPoints: 0.42, 0, 0.58, 1)
+        barLayer.add(anim, forKey: "bounce")
     }
 }

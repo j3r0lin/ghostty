@@ -821,6 +821,15 @@ class BaseTerminalController: NSWindowController,
                 }
                 .sink { [weak self] newTitle in self?.titleDidChange(to: newTitle) }
                 .store(in: &focusedSurfaceCancellables)
+
+            // Listen for progress report changes to show/hide tab progress bar.
+            titleSurface.$progressReport
+                .map { $0 != nil }
+                .removeDuplicates()
+                .sink { [weak self] hasProgress in
+                    (self?.window as? TerminalWindow)?.showTabProgress = hasProgress
+                }
+                .store(in: &focusedSurfaceCancellables)
         } else {
             // There is no surface to listen to titles for.
             titleDidChange(to: "👻")
