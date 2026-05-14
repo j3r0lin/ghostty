@@ -69,11 +69,14 @@ class TerminalWindow: NSWindow {
     }
 
     /// Whether a progress indicator is shown on this window's tab.
+    /// The layer is hidden when this window is the key window (active tab),
+    /// since the content area already shows its own progress bar.
     var showTabProgress: Bool = false {
         didSet {
             guard showTabProgress != oldValue else { return }
             if showTabProgress {
                 attachTabProgressLayer()
+                tabProgressLayer?.isHidden = isKeyWindow
             } else {
                 tabProgressLayer?.removeFromSuperlayer()
                 tabProgressLayer = nil
@@ -83,26 +86,79 @@ class TerminalWindow: NSWindow {
 
     var tabProgressLayer: TabProgressBarLayer?
 
+    func updateTabProgressVisibility() {
+        tabProgressLayer?.isHidden = isKeyWindow
+    }
+
     /// The detected CLI agent for this window's tab icon.
     var tabAgent: CLIAgent? {
         didSet {
             guard tabAgent != oldValue else { return }
-            if let agent = tabAgent {
-                tabAgentIconView.rootView = TabAgentIconView(agent: agent)
-                tabAgentIconView.isHidden = false
-            } else {
-                tabAgentIconView.isHidden = true
-            }
+            updateTabAgentIcon()
         }
     }
 
-    /// Agent icon shown in tab.accessoryView.
-    private lazy var tabAgentIconView: NSHostingView<TabAgentIconView> = {
-        let view = NSHostingView(rootView: TabAgentIconView(agent: nil))
-        view.translatesAutoresizingMaskIntoConstraints = false
-        view.isHidden = true
-        return view
-    }()
+    private var tabAgentIconView: NSImageView?
+
+    private func updateTabAgentIcon() {
+        tabAgentIconView?.removeFromSuperview()
+        tabAgentIconView = nil
+
+        guard let agent = tabAgent else { return }
+        guard let accessory = tab.accessoryView else { return }
+
+        // Walk up from the accessory view to find the enclosing NSTabButton.
+        var tabButton: NSView?
+        var current: NSView? = accessory
+        while let v = current {
+            if v.className == "NSTabButton" {
+                tabButton = v
+                break
+            }
+            current = v.superview
+        }
+        guard let tabButton else { return }
+
+        // Find the title label inside the NSTabButton to position relative to it.
+        let titleLabel = findDescendant(of: tabButton, className: "NSTextField")
+
+        guard let nsImage = NSImage(data: agent.svgData) else { return }
+        nsImage.isTemplate = true
+
+        let iconView = NSImageView()
+        iconView.image = nsImage
+        iconView.contentTintColor = .secondaryLabelColor
+        iconView.imageScaling = .scaleProportionallyUpOrDown
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        tabButton.addSubview(iconView)
+
+        let iconSize: CGFloat = 12
+        if let titleLabel {
+            NSLayoutConstraint.activate([
+                iconView.trailingAnchor.constraint(equalTo: titleLabel.leadingAnchor, constant: -3),
+                iconView.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
+                iconView.widthAnchor.constraint(equalToConstant: iconSize),
+                iconView.heightAnchor.constraint(equalToConstant: iconSize),
+            ])
+        } else {
+            NSLayoutConstraint.activate([
+                iconView.leadingAnchor.constraint(equalTo: tabButton.leadingAnchor, constant: 8),
+                iconView.centerYAnchor.constraint(equalTo: tabButton.centerYAnchor),
+                iconView.widthAnchor.constraint(equalToConstant: iconSize),
+                iconView.heightAnchor.constraint(equalToConstant: iconSize),
+            ])
+        }
+
+        tabAgentIconView = iconView
+    }
+
+    private func findDescendant(of view: NSView, className: String) -> NSView? {
+        for subview in view.subviews {
+            if subview.className == className { return subview }
+            if let found = findDescendant(of: subview, className: className) { return found }
+        }
+        return nil
+    }
 
     /// Find our own NSTabButton by walking up from our tab.accessoryView.
     func attachTabProgressLayer() {
@@ -224,7 +280,6 @@ class TerminalWindow: NSWindow {
         stackView.setHuggingPriority(.defaultHigh, for: .horizontal)
         stackView.spacing = 4
         stackView.alignment = .centerY
-        stackView.addArrangedSubview(tabAgentIconView)
         stackView.addArrangedSubview(tabColorIndicator)
         stackView.addArrangedSubview(keyEquivalentLabel)
         stackView.addArrangedSubview(resetZoomTabButton)
@@ -902,23 +957,6 @@ extension TerminalWindow: TabTitleEditorDelegate {
               let focusedSurface = controller.focusedSurface
         else { return }
         makeFirstResponder(focusedSurface)
-    }
-}
-
-// MARK: - Tab Agent Icon
-
-/// A small icon displayed in the tab accessory view showing the detected CLI agent.
-struct TabAgentIconView: View {
-    let agent: CLIAgent?
-
-    var body: some View {
-        if let agent, let nsImage = NSImage(data: agent.svgData) {
-            let _ = { nsImage.isTemplate = true }()
-            Image(nsImage: nsImage)
-                .resizable()
-                .frame(width: 14, height: 14)
-                .opacity(0.7)
-        }
     }
 }
 

@@ -1282,14 +1282,17 @@ class BaseTerminalController: NSWindowController,
         }
 
         // The tab bar moves to the new key window. Re-attach progress layers
-        // for all windows that have active progress.
+        // and update visibility (hide on active tab, show on others).
         DispatchQueue.main.async { [weak self] in
             guard let tabGroup = self?.window?.tabGroup else { return }
             for window in tabGroup.windows {
-                guard let tw = window as? TerminalWindow, tw.showTabProgress else { continue }
-                tw.tabProgressLayer?.removeFromSuperlayer()
-                tw.tabProgressLayer = nil
-                tw.attachTabProgressLayer()
+                guard let tw = window as? TerminalWindow else { continue }
+                if tw.showTabProgress {
+                    if tw.tabProgressLayer == nil {
+                        tw.attachTabProgressLayer()
+                    }
+                    tw.updateTabProgressVisibility()
+                }
             }
         }
     }
