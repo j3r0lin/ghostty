@@ -131,11 +131,9 @@ class TerminalWindow: NSWindow {
         let titleLabel = findDescendant(of: tabButton, className: "NSTextField")
 
         guard let nsImage = NSImage(data: agent.svgData) else { return }
-        nsImage.isTemplate = true
 
         let iconView = NSImageView()
         iconView.image = nsImage
-        iconView.contentTintColor = .secondaryLabelColor
         iconView.imageScaling = .scaleProportionallyUpOrDown
         iconView.translatesAutoresizingMaskIntoConstraints = false
         tabButton.addSubview(iconView)
