@@ -813,10 +813,10 @@ class BaseTerminalController: NSWindowController,
         // closed surfaces.
         if let titleSurface = focusedSurface ?? lastFocusedSurface,
            surfaceTree.contains(titleSurface) {
-            // If we have a surface, we want to listen for title changes.
+            // If we have a surface, we want to listen for title and pwd changes.
             titleSurface.$title
-                .combineLatest(titleSurface.$bell)
-                .map { [weak self] in self?.computeTitle(title: $0, bell: $1) ?? "" }
+                .combineLatest(titleSurface.$bell, titleSurface.$pwd)
+                .map { [weak self] in self?.computeTitle(title: $0, bell: $1, pwd: $2) ?? "" }
                 .sink { [weak self] in self?.titleDidChange(to: $0) }
                 .store(in: &focusedSurfaceCancellables)
         } else {
@@ -825,13 +825,30 @@ class BaseTerminalController: NSWindowController,
         }
     }
 
-    private func computeTitle(title: String, bell: Bool) -> String {
+    private func computeTitle(title: String, bell: Bool, pwd: String? = nil) -> String {
         var result = title
         if bell && ghostty.config.bellFeatures.contains(.title) {
             result = "🔔 \(result)"
         }
 
+        if derivedConfig.windowSubtitle == .workingDirectory, let pwd = pwd {
+            let suffix = shortenedPath(pwd, components: 2)
+            if !suffix.isEmpty {
+                result = "\(result) · \(suffix)"
+            }
+        }
+
         return result
+    }
+
+    private func shortenedPath(_ path: String, components: Int) -> String {
+        let cleaned = path.hasSuffix("/") && path != "/" ? String(path.dropLast()) : path
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let display = cleaned.hasPrefix(home) ? "~" + cleaned.dropFirst(home.count) : cleaned
+        let parts = display.split(separator: "/", omittingEmptySubsequences: true)
+        if parts.isEmpty { return display }
+        let taken = parts.suffix(components)
+        return taken.joined(separator: "/")
     }
 
     private func titleDidChange(to: String) {
@@ -845,7 +862,8 @@ class BaseTerminalController: NSWindowController,
         if let titleOverride {
             window.title = computeTitle(
                 title: titleOverride,
-                bell: focusedSurface?.bell ?? false)
+                bell: focusedSurface?.bell ?? false,
+                pwd: focusedSurface?.pwd)
             return
         }
 
@@ -1432,12 +1450,14 @@ class BaseTerminalController: NSWindowController,
         let windowStepResize: Bool
         let focusFollowsMouse: Bool
         let splitPreserveZoom: Ghostty.Config.SplitPreserveZoom
+        let windowSubtitle: Ghostty.WindowSubtitle
 
         init() {
             self.macosTitlebarProxyIcon = .visible
             self.windowStepResize = false
             self.focusFollowsMouse = false
             self.splitPreserveZoom = .init()
+            self.windowSubtitle = .false
         }
 
         init(_ config: Ghostty.Config) {
@@ -1445,6 +1465,7 @@ class BaseTerminalController: NSWindowController,
             self.windowStepResize = config.windowStepResize
             self.focusFollowsMouse = config.focusFollowsMouse
             self.splitPreserveZoom = config.splitPreserveZoom
+            self.windowSubtitle = config.windowSubtitle
         }
     }
 }
