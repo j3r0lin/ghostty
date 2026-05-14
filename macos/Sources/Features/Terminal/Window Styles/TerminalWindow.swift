@@ -84,7 +84,7 @@ class TerminalWindow: NSWindow {
         }
     }
 
-    var tabProgressLayer: TabProgressBarLayer?
+    private(set) var tabProgressLayer: TabProgressBarLayer?
 
     func updateTabProgressVisibility() {
         tabProgressLayer?.isHidden = isKeyWindow
@@ -100,6 +100,14 @@ class TerminalWindow: NSWindow {
 
     private var tabAgentIconView: NSImageView?
 
+    func reattachTabAgentIconIfNeeded() {
+        guard tabAgent != nil else { return }
+        // If the icon view is no longer in the view hierarchy (tab bar rebuilt),
+        // re-create it.
+        if tabAgentIconView?.superview == nil {
+            updateTabAgentIcon()
+        }
+    }
     private func updateTabAgentIcon() {
         tabAgentIconView?.removeFromSuperview()
         tabAgentIconView = nil
@@ -132,22 +140,15 @@ class TerminalWindow: NSWindow {
         iconView.translatesAutoresizingMaskIntoConstraints = false
         tabButton.addSubview(iconView)
 
+        // Position after the close button area. The tab close button is ~16px wide
+        // centered around ~10px from the leading edge, so 24px clears it.
         let iconSize: CGFloat = 12
-        if let titleLabel {
-            NSLayoutConstraint.activate([
-                iconView.trailingAnchor.constraint(equalTo: titleLabel.leadingAnchor, constant: -3),
-                iconView.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
-                iconView.widthAnchor.constraint(equalToConstant: iconSize),
-                iconView.heightAnchor.constraint(equalToConstant: iconSize),
-            ])
-        } else {
-            NSLayoutConstraint.activate([
-                iconView.leadingAnchor.constraint(equalTo: tabButton.leadingAnchor, constant: 8),
-                iconView.centerYAnchor.constraint(equalTo: tabButton.centerYAnchor),
-                iconView.widthAnchor.constraint(equalToConstant: iconSize),
-                iconView.heightAnchor.constraint(equalToConstant: iconSize),
-            ])
-        }
+        NSLayoutConstraint.activate([
+            iconView.leadingAnchor.constraint(equalTo: tabButton.leadingAnchor, constant: 24),
+            iconView.centerYAnchor.constraint(equalTo: tabButton.centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: iconSize),
+            iconView.heightAnchor.constraint(equalToConstant: iconSize),
+        ])
 
         tabAgentIconView = iconView
     }
@@ -966,6 +967,7 @@ extension TerminalWindow: TabTitleEditorDelegate {
 class TabProgressBarLayer: CALayer {
     private let barLayer = CALayer()
     private let bgLayer = CALayer()
+    private var lastKnownWidth: CGFloat = 0
 
     override init() {
         super.init()
@@ -993,7 +995,10 @@ class TabProgressBarLayer: CALayer {
     override func layoutSublayers() {
         super.layoutSublayers()
         bgLayer.frame = bounds
-        startBouncing()
+        if bounds.width != lastKnownWidth {
+            lastKnownWidth = bounds.width
+            startBouncing()
+        }
     }
 
     func startBouncing() {

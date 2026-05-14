@@ -1293,6 +1293,10 @@ class BaseTerminalController: NSWindowController,
                     }
                     tw.updateTabProgressVisibility()
                 }
+                // Re-attach agent icon if needed.
+                if tw.tabAgent != nil {
+                    tw.reattachTabAgentIconIfNeeded()
+                }
             }
         }
     }
