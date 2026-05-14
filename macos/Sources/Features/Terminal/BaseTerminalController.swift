@@ -831,7 +831,7 @@ class BaseTerminalController: NSWindowController,
             result = "🔔 \(result)"
         }
 
-        if derivedConfig.windowSubtitle == .workingDirectory, let pwd = pwd {
+        if derivedConfig.windowSubtitle == Ghostty.WindowSubtitle.workingDirectory, let pwd = pwd {
             let suffix = shortenedPath(pwd, components: 2)
             if !suffix.isEmpty {
                 result = "\(result) · \(suffix)"
@@ -1457,7 +1457,7 @@ class BaseTerminalController: NSWindowController,
             self.windowStepResize = false
             self.focusFollowsMouse = false
             self.splitPreserveZoom = .init()
-            self.windowSubtitle = .false
+            self.windowSubtitle = Ghostty.WindowSubtitle.false
         }
 
         init(_ config: Ghostty.Config) {
