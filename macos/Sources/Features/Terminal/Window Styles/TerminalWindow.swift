@@ -98,21 +98,15 @@ class TerminalWindow: NSWindow {
             searchRoot = v.superview
         }
         guard let root = searchRoot else { return }
+        // Sort tab buttons by x position so visual order matches tabGroup.windows order.
         let tabButtons = findDescendants(of: root, className: "NSTabButton")
+            .sorted { $0.convert($0.bounds.origin, to: nil).x < $1.convert($1.bounds.origin, to: nil).x }
 
-        // Build a title→window lookup for matching tab buttons to windows.
-        var windowsByTitle: [String: TerminalWindow] = [:]
-        for window in tabGroup.windows {
-            if let termWindow = window as? TerminalWindow {
-                windowsByTitle[termWindow.title] = termWindow
-            }
-        }
-
-        for tabButton in tabButtons {
-            let buttonTitle = (tabButton as? NSButton)?.title ?? ""
-            let termWindow = windowsByTitle[buttonTitle]
-            let isSelected = (termWindow == keyWindow)
-            // Don't show tab progress on the active tab (content area already has one).
+        let windows = tabGroup.windows
+        for (index, tabButton) in tabButtons.enumerated() {
+            guard index < windows.count else { break }
+            let termWindow = windows[index] as? TerminalWindow
+            let isSelected = (windows[index] == keyWindow)
             let needsProgress = !isSelected && (termWindow?.showTabProgress ?? false)
 
             let existingLayer = tabButton.layer?.sublayers?.first { $0 is TabProgressBarLayer } as? TabProgressBarLayer
