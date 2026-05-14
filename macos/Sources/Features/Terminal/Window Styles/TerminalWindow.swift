@@ -68,21 +68,64 @@ class TerminalWindow: NSWindow {
         }
     }
 
-    /// Whether a progress indicator is shown on this window's tab accessory.
+    /// Whether a progress indicator is shown on this window's tab.
     var showTabProgress: Bool = false {
         didSet {
             guard showTabProgress != oldValue else { return }
-            tabProgressIndicator.isHidden = !showTabProgress
+            if showTabProgress {
+                attachTabProgressLayer()
+            } else {
+                tabProgressLayer?.removeFromSuperlayer()
+                tabProgressLayer = nil
+            }
         }
     }
 
-    /// A small animated progress view shown in tab.accessoryView.
-    private lazy var tabProgressIndicator: NSHostingView<TabProgressIndicatorView> = {
-        let view = NSHostingView(rootView: TabProgressIndicatorView())
+    var tabProgressLayer: TabProgressBarLayer?
+
+    /// The detected CLI agent for this window's tab icon.
+    var tabAgent: CLIAgent? {
+        didSet {
+            guard tabAgent != oldValue else { return }
+            if let agent = tabAgent {
+                tabAgentIconView.rootView = TabAgentIconView(agent: agent)
+                tabAgentIconView.isHidden = false
+            } else {
+                tabAgentIconView.isHidden = true
+            }
+        }
+    }
+
+    /// Agent icon shown in tab.accessoryView.
+    private lazy var tabAgentIconView: NSHostingView<TabAgentIconView> = {
+        let view = NSHostingView(rootView: TabAgentIconView(agent: nil))
         view.translatesAutoresizingMaskIntoConstraints = false
         view.isHidden = true
         return view
     }()
+
+    /// Find our own NSTabButton by walking up from our tab.accessoryView.
+    func attachTabProgressLayer() {
+        guard tabProgressLayer == nil else { return }
+        guard let accessory = tab.accessoryView else { return }
+
+        // Walk up from the accessory view to find the enclosing NSTabButton.
+        var current: NSView? = accessory
+        while let v = current {
+            if v.className == "NSTabButton" {
+                let layer = TabProgressBarLayer()
+                let height: CGFloat = 2
+                layer.frame = CGRect(x: 0, y: 0, width: v.bounds.width, height: height)
+                layer.autoresizingMask = [.layerWidthSizable]
+                v.wantsLayer = true
+                v.layer?.addSublayer(layer)
+                layer.startBouncing()
+                tabProgressLayer = layer
+                return
+            }
+            current = v.superview
+        }
+    }
 
     // MARK: NSWindow Overrides
 
@@ -181,7 +224,7 @@ class TerminalWindow: NSWindow {
         stackView.setHuggingPriority(.defaultHigh, for: .horizontal)
         stackView.spacing = 4
         stackView.alignment = .centerY
-        stackView.addArrangedSubview(tabProgressIndicator)
+        stackView.addArrangedSubview(tabAgentIconView)
         stackView.addArrangedSubview(tabColorIndicator)
         stackView.addArrangedSubview(keyEquivalentLabel)
         stackView.addArrangedSubview(resetZoomTabButton)
@@ -862,29 +905,72 @@ extension TerminalWindow: TabTitleEditorDelegate {
     }
 }
 
-// MARK: - Tab Progress Indicator
+// MARK: - Tab Agent Icon
 
-/// A small bouncing progress bar displayed in the tab accessory view.
-private struct TabProgressIndicatorView: View {
-    @State private var position: CGFloat = 0
+/// A small icon displayed in the tab accessory view showing the detected CLI agent.
+struct TabAgentIconView: View {
+    let agent: CLIAgent?
 
     var body: some View {
-        ZStack(alignment: .leading) {
-            RoundedRectangle(cornerRadius: 1.5)
-                .fill(Color.accentColor.opacity(0.2))
+        if let agent, let nsImage = NSImage(data: agent.svgData) {
+            let _ = { nsImage.isTemplate = true }()
+            Image(nsImage: nsImage)
+                .resizable()
+                .frame(width: 14, height: 14)
+                .opacity(0.7)
+        }
+    }
+}
 
-            GeometryReader { geo in
-                RoundedRectangle(cornerRadius: 1.5)
-                    .fill(Color.accentColor)
-                    .frame(width: geo.size.width * 0.4)
-                    .offset(x: position * geo.size.width * 0.6)
-            }
-        }
-        .frame(width: 32, height: 3)
-        .onAppear {
-            withAnimation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true)) {
-                position = 1
-            }
-        }
+// MARK: - Tab Progress Bar
+
+/// A Core Animation layer that renders a bouncing indeterminate progress bar.
+class TabProgressBarLayer: CALayer {
+    private let barLayer = CALayer()
+    private let bgLayer = CALayer()
+
+    override init() {
+        super.init()
+        setup()
+    }
+
+    override init(layer: Any) {
+        super.init(layer: layer)
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setup()
+    }
+
+    private func setup() {
+        let color = NSColor.controlAccentColor
+        bgLayer.backgroundColor = color.withAlphaComponent(0.15).cgColor
+        addSublayer(bgLayer)
+        barLayer.backgroundColor = color.cgColor
+        barLayer.cornerRadius = 1
+        addSublayer(barLayer)
+    }
+
+    override func layoutSublayers() {
+        super.layoutSublayers()
+        bgLayer.frame = bounds
+        startBouncing()
+    }
+
+    func startBouncing() {
+        barLayer.removeAllAnimations()
+        let barWidth = max(bounds.width * 0.25, 20)
+        let maxX = max(bounds.width - barWidth, 0)
+        barLayer.frame = CGRect(x: 0, y: 0, width: barWidth, height: bounds.height)
+
+        let anim = CABasicAnimation(keyPath: "position.x")
+        anim.fromValue = barWidth / 2
+        anim.toValue = maxX + barWidth / 2
+        anim.duration = 1.2
+        anim.autoreverses = true
+        anim.repeatCount = .infinity
+        anim.timingFunction = CAMediaTimingFunction(controlPoints: 0.42, 0, 0.58, 1)
+        barLayer.add(anim, forKey: "bounce")
     }
 }

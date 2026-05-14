@@ -830,6 +830,14 @@ class BaseTerminalController: NSWindowController,
                     (self?.window as? TerminalWindow)?.showTabProgress = hasProgress
                 }
                 .store(in: &focusedSurfaceCancellables)
+
+            // Listen for CLI agent detection changes to show/hide tab agent icon.
+            titleSurface.$detectedAgent
+                .removeDuplicates()
+                .sink { [weak self] agent in
+                    (self?.window as? TerminalWindow)?.tabAgent = agent
+                }
+                .store(in: &focusedSurfaceCancellables)
         } else {
             // There is no surface to listen to titles for.
             titleDidChange(to: "👻")
@@ -1273,6 +1281,17 @@ class BaseTerminalController: NSWindowController,
             self.syncFocusToSurfaceTree()
         }
 
+        // The tab bar moves to the new key window. Re-attach progress layers
+        // for all windows that have active progress.
+        DispatchQueue.main.async { [weak self] in
+            guard let tabGroup = self?.window?.tabGroup else { return }
+            for window in tabGroup.windows {
+                guard let tw = window as? TerminalWindow, tw.showTabProgress else { continue }
+                tw.tabProgressLayer?.removeFromSuperlayer()
+                tw.tabProgressLayer = nil
+                tw.attachTabProgressLayer()
+            }
+        }
     }
 
     func windowDidResignKey(_ notification: Notification) {
