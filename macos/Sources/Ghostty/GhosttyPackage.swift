@@ -320,6 +320,12 @@ extension Ghostty {
         case hidden
     }
 
+    /// Enum for the window-subtitle config option
+    enum WindowSubtitle: String {
+        case `false`
+        case workingDirectory = "working-directory"
+    }
+
     /// Enum for auto-update-channel config option
     enum AutoUpdateChannel: String {
         case tip

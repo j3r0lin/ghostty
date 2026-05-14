@@ -943,9 +943,4 @@ extension Ghostty.Config {
         static let `default` = MacOSTitlebarStyle.transparent
         case native, transparent, tabs, hidden
     }
-
-    enum WindowSubtitle: String {
-        case `false`
-        case workingDirectory = "working-directory"
-    }
 }
