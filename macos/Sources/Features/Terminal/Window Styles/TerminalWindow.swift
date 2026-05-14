@@ -72,59 +72,59 @@ class TerminalWindow: NSWindow {
     var showTabProgress: Bool = false {
         didSet {
             guard showTabProgress != oldValue else { return }
-            if showTabProgress {
-                attachTabProgressBar()
-            } else {
-                removeTabProgressBar()
-            }
+            // Trigger a refresh on the key window which owns the tab bar.
+            TerminalWindow.refreshAllTabProgressBars(in: self.tabGroup)
         }
     }
 
-    private var tabProgressLayer: TabProgressBarLayer?
+    private static var progressLayerKey: UInt8 = 0
 
-    private func attachTabProgressBar() {
-        guard tabProgressLayer == nil else { return }
-        guard let tabButton = findOwnTabButton() else { return }
+    /// Scan every window in the tab group and attach/detach progress bar
+    /// layers on the corresponding NSTabButton. The tab bar only exists on
+    /// the key window, so we always search from there.
+    static func refreshAllTabProgressBars(in tabGroup: NSWindowTabGroup?) {
+        guard let tabGroup, let keyWindow = tabGroup.selectedWindow else { return }
 
-        let layer = TabProgressBarLayer()
-        let height: CGFloat = 2
-        layer.frame = CGRect(x: 0, y: 0, width: tabButton.bounds.width, height: height)
-        layer.autoresizingMask = [.layerWidthSizable]
+        // Find all NSTabButton views inside the key window's titlebar.
+        guard let titlebarContainer = keyWindow.standardWindowButton(.closeButton)?
+            .superview?.superview else { return }
 
-        tabButton.wantsLayer = true
-        tabButton.layer?.addSublayer(layer)
-        layer.startBouncing()
-        tabProgressLayer = layer
-    }
-
-    private func removeTabProgressBar() {
-        tabProgressLayer?.removeFromSuperlayer()
-        tabProgressLayer = nil
-    }
-
-    private func findOwnTabButton() -> NSView? {
-        guard let closeButton = standardWindowButton(.closeButton),
-              let titlebarContainer = closeButton.superview?.superview else { return nil }
-
-        var current: NSView? = titlebarContainer
-        while let v = current {
+        var searchRoot: NSView? = titlebarContainer
+        while let v = searchRoot {
             if v.className == "NSTitlebarContainerView" || v.className == "NSTitlebarView" {
-                return findDescendants(of: v, className: "NSTabButton")
-                    .first { tabButton in
-                        // NSTabButton for the current window can be identified by
-                        // checking if it's in a "selected" state when this window is key.
-                        if let button = tabButton as? NSButton {
-                            return button.title == self.title
-                        }
-                        return false
-                    }
+                searchRoot = v
+                break
             }
-            current = v.superview
+            searchRoot = v.superview
         }
-        return nil
+        guard let root = searchRoot else { return }
+        let tabButtons = findDescendants(of: root, className: "NSTabButton")
+
+        let windows = tabGroup.windows
+        // Tab buttons appear in the same order as the windows in the group.
+        for (index, window) in windows.enumerated() {
+            guard index < tabButtons.count else { break }
+            let tabButton = tabButtons[index]
+            let termWindow = window as? TerminalWindow
+            let needsProgress = termWindow?.showTabProgress ?? false
+
+            let existingLayer = tabButton.layer?.sublayers?.first { $0 is TabProgressBarLayer } as? TabProgressBarLayer
+
+            if needsProgress && existingLayer == nil {
+                let layer = TabProgressBarLayer()
+                let height: CGFloat = 2
+                layer.frame = CGRect(x: 0, y: 0, width: tabButton.bounds.width, height: height)
+                layer.autoresizingMask = [.layerWidthSizable]
+                tabButton.wantsLayer = true
+                tabButton.layer?.addSublayer(layer)
+                layer.startBouncing()
+            } else if !needsProgress, let existing = existingLayer {
+                existing.removeFromSuperlayer()
+            }
+        }
     }
 
-    private func findDescendants(of view: NSView, className: String) -> [NSView] {
+    private static func findDescendants(of view: NSView, className: String) -> [NSView] {
         var results: [NSView] = []
         for subview in view.subviews {
             if subview.className == className {
