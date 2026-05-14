@@ -131,20 +131,31 @@ enum CLIAgent: String, CaseIterable, Equatable {
 
 enum CLIAgentDetector {
     static func detect(fromPID pid: Int) -> CLIAgent? {
-        var currentPID = Int32(pid)
+        let startPID = Int32(pid)
+
+        // Walk up the ancestor chain.
+        var currentPID = startPID
         for _ in 0..<20 {
-            guard currentPID > 1 else { return nil }
-
-            if let path = executablePath(for: currentPID) {
-                let lowered = path.lowercased()
-                for agent in CLIAgent.allCases {
-                    if agent.pathKeywords.contains(where: { lowered.contains($0) }) {
-                        return agent
-                    }
-                }
-            }
-
+            guard currentPID > 1 else { break }
+            if let agent = matchAgent(for: currentPID) { return agent }
             currentPID = parentPID(of: currentPID)
+        }
+
+        // Check direct children of the foreground process (e.g. node → native codex binary).
+        for childPID in childPIDs(of: startPID) {
+            if let agent = matchAgent(for: childPID) { return agent }
+        }
+
+        return nil
+    }
+
+    private static func matchAgent(for pid: Int32) -> CLIAgent? {
+        guard let path = executablePath(for: pid) else { return nil }
+        let lowered = path.lowercased()
+        for agent in CLIAgent.allCases {
+            if agent.pathKeywords.contains(where: { lowered.contains($0) }) {
+                return agent
+            }
         }
         return nil
     }
@@ -162,5 +173,29 @@ enum CLIAgentDetector {
         let ret = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size)
         guard ret > 0 else { return 0 }
         return Int32(info.pbi_ppid)
+    }
+
+    private static func childPIDs(of parentPID: Int32) -> [Int32] {
+        // Get all PIDs on the system, then filter by ppid.
+        var count = proc_listpids(UInt32(PROC_ALL_PIDS), 0, nil, 0)
+        guard count > 0 else { return [] }
+        var pids = [Int32](repeating: 0, count: Int(count) / MemoryLayout<Int32>.size + 16)
+        count = pids.withUnsafeMutableBufferPointer { buf in
+            proc_listpids(UInt32(PROC_ALL_PIDS), 0, buf.baseAddress, Int32(buf.count * MemoryLayout<Int32>.size))
+        }
+        let pidCount = Int(count) / MemoryLayout<Int32>.size
+
+        var children: [Int32] = []
+        for i in 0..<pidCount {
+            let pid = pids[i]
+            guard pid > 0 else { continue }
+            var info = proc_bsdinfo()
+            let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+            let ret = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size)
+            if ret > 0 && Int32(info.pbi_ppid) == parentPID {
+                children.append(pid)
+            }
+        }
+        return children
     }
 }
