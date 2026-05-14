@@ -125,6 +125,10 @@ pub const Action = union(Key) {
     /// it between fully opaque and the configured background opacity.
     toggle_background_opacity,
 
+    /// Focus the surface that emitted the most recent desktop
+    /// notification, equivalent to clicking on the notification.
+    focus_last_notification_source,
+
     /// Moves a tab by a relative offset.
     ///
     /// Adjusts the tab position based on `offset` (e.g., -1 for left, +1
@@ -359,6 +363,7 @@ pub const Action = union(Key) {
         toggle_command_palette,
         toggle_visibility,
         toggle_background_opacity,
+        focus_last_notification_source,
         move_tab,
         goto_tab,
         goto_split,

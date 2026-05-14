@@ -1693,6 +1693,12 @@ extension Ghostty {
                 "requireFocus": requireFocus,
             ]
 
+            // Record this surface so the focus_last_notification_source keybind
+            // knows where to jump. Multiple notifications keep only the latest.
+            if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
+                appDelegate.ghostty.lastNotificationSurfaceID = self.id
+            }
+
             let uuid = UUID().uuidString
             let request = UNNotificationRequest(
                 identifier: uuid,

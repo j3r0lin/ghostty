@@ -818,6 +818,19 @@ pub const Action = union(enum) {
     /// Only implemented on macOS.
     toggle_visibility,
 
+    /// Focus the surface that emitted the most recent desktop notification.
+    /// This brings its window to the front and moves keyboard focus to it,
+    /// the same effect as clicking on the notification banner. After being
+    /// triggered (or after the notification is clicked/dismissed) the
+    /// recorded surface is cleared, so subsequent presses do nothing until
+    /// a new notification arrives.
+    ///
+    /// Combine with the `global:` prefix to invoke this while Ghostty is
+    /// in the background.
+    ///
+    /// Only implemented on macOS.
+    focus_last_notification_source,
+
     /// Toggle the window background opacity between transparent and opaque.
     ///
     /// This does nothing when `background-opacity` is set to 1 or above.
@@ -1304,6 +1317,7 @@ pub const Action = union(enum) {
             .toggle_visibility,
             .check_for_updates,
             .show_gtk_inspector,
+            .focus_last_notification_source,
             => .app,
 
             // These are app but can be special-cased in a surface context.

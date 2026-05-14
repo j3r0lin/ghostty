@@ -40,6 +40,11 @@ extension Ghostty {
             }
         }
 
+        /// UUID of the surface that emitted the most recent desktop notification.
+        /// Cleared when the notification is clicked/dismissed or when the
+        /// `focus_last_notification_source` keybind has been handled.
+        var lastNotificationSurfaceID: UUID?
+
         /// True if we need to confirm before quitting.
         var needsConfirmQuit: Bool {
             guard let app = app else { return false }
@@ -592,6 +597,9 @@ extension Ghostty {
 
             case GHOSTTY_ACTION_TOGGLE_QUICK_TERMINAL:
                 toggleQuickTerminal(app, target: target)
+
+            case GHOSTTY_ACTION_FOCUS_LAST_NOTIFICATION_SOURCE:
+                focusLastNotificationSource(app, target: target)
 
             case GHOSTTY_ACTION_TOGGLE_VISIBILITY:
                 toggleVisibility(app, target: target)
@@ -1590,6 +1598,15 @@ extension Ghostty {
             appDelegate.toggleQuickTerminal(self)
         }
 
+        private static func focusLastNotificationSource(
+            _ app: ghostty_app_t,
+            target: ghostty_target_s
+        ) {
+            guard let app_ud = ghostty_app_userdata(app) else { return }
+            let ghosttyApp = Unmanaged<App>.fromOpaque(app_ud).takeUnretainedValue()
+            ghosttyApp.focusLastNotificationSource()
+        }
+
         private static func setTitle(
             _ app: ghostty_app_t,
             target: ghostty_target_s,
@@ -2249,6 +2266,12 @@ extension Ghostty {
                   let uuid = UUID(uuidString: uuidString),
                   let surface = delegate?.findSurface(forUUID: uuid) else { return }
 
+            // The user already responded to the notification (clicked or
+            // dismissed), so the keybind no longer has anything to do.
+            if lastNotificationSurfaceID == uuid {
+                lastNotificationSurfaceID = nil
+            }
+
             switch response.actionIdentifier {
             case UNNotificationDefaultActionIdentifier, Ghostty.userNotificationActionShow:
                 // The user clicked on a notification
@@ -2259,6 +2282,17 @@ extension Ghostty {
             default:
                 break
             }
+        }
+
+        /// Focus the surface that emitted the most recent desktop notification.
+        /// This is the keybind-driven equivalent of clicking the notification.
+        func focusLastNotificationSource() {
+            guard let uuid = lastNotificationSurfaceID,
+                  let surface = delegate?.findSurface(forUUID: uuid) else { return }
+            lastNotificationSurfaceID = nil
+            surface.window?.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            Ghostty.moveFocus(to: surface)
         }
 
         #endif
