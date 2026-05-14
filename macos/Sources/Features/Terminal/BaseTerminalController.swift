@@ -1273,11 +1273,6 @@ class BaseTerminalController: NSWindowController,
             self.syncFocusToSurfaceTree()
         }
 
-        // The tab bar lives on the key window, so re-attach progress bars
-        // whenever the key window changes.
-        DispatchQueue.main.async { [weak self] in
-            TerminalWindow.refreshAllTabProgressBars(in: self?.window?.tabGroup)
-        }
     }
 
     func windowDidResignKey(_ notification: Notification) {

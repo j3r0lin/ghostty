@@ -68,73 +68,21 @@ class TerminalWindow: NSWindow {
         }
     }
 
-    /// Whether a progress indicator is shown on this window's tab.
+    /// Whether a progress indicator is shown on this window's tab accessory.
     var showTabProgress: Bool = false {
         didSet {
             guard showTabProgress != oldValue else { return }
-            // Trigger a refresh on the key window which owns the tab bar.
-            TerminalWindow.refreshAllTabProgressBars(in: self.tabGroup)
+            tabProgressIndicator.isHidden = !showTabProgress
         }
     }
 
-    private static var progressLayerKey: UInt8 = 0
-
-    /// Scan every window in the tab group and attach/detach progress bar
-    /// layers on the corresponding NSTabButton. The tab bar only exists on
-    /// the key window, so we always search from there.
-    static func refreshAllTabProgressBars(in tabGroup: NSWindowTabGroup?) {
-        guard let tabGroup, let keyWindow = tabGroup.selectedWindow else { return }
-
-        // Find all NSTabButton views inside the key window's titlebar.
-        guard let titlebarContainer = keyWindow.standardWindowButton(.closeButton)?
-            .superview?.superview else { return }
-
-        var searchRoot: NSView? = titlebarContainer
-        while let v = searchRoot {
-            if v.className == "NSTitlebarContainerView" || v.className == "NSTitlebarView" {
-                searchRoot = v
-                break
-            }
-            searchRoot = v.superview
-        }
-        guard let root = searchRoot else { return }
-        // Sort tab buttons by x position so visual order matches tabGroup.windows order.
-        let tabButtons = findDescendants(of: root, className: "NSTabButton")
-            .sorted { $0.convert($0.bounds.origin, to: nil).x < $1.convert($1.bounds.origin, to: nil).x }
-
-        let windows = tabGroup.windows
-        for (index, tabButton) in tabButtons.enumerated() {
-            guard index < windows.count else { break }
-            let termWindow = windows[index] as? TerminalWindow
-            let isSelected = (windows[index] == keyWindow)
-            let needsProgress = !isSelected && (termWindow?.showTabProgress ?? false)
-
-            let existingLayer = tabButton.layer?.sublayers?.first { $0 is TabProgressBarLayer } as? TabProgressBarLayer
-
-            if needsProgress && existingLayer == nil {
-                let layer = TabProgressBarLayer()
-                let height: CGFloat = 2
-                layer.frame = CGRect(x: 0, y: 0, width: tabButton.bounds.width, height: height)
-                layer.autoresizingMask = [.layerWidthSizable]
-                tabButton.wantsLayer = true
-                tabButton.layer?.addSublayer(layer)
-                layer.startBouncing()
-            } else if !needsProgress, let existing = existingLayer {
-                existing.removeFromSuperlayer()
-            }
-        }
-    }
-
-    private static func findDescendants(of view: NSView, className: String) -> [NSView] {
-        var results: [NSView] = []
-        for subview in view.subviews {
-            if subview.className == className {
-                results.append(subview)
-            }
-            results.append(contentsOf: findDescendants(of: subview, className: className))
-        }
-        return results
-    }
+    /// A small animated progress view shown in tab.accessoryView.
+    private lazy var tabProgressIndicator: NSHostingView<TabProgressIndicatorView> = {
+        let view = NSHostingView(rootView: TabProgressIndicatorView())
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.isHidden = true
+        return view
+    }()
 
     // MARK: NSWindow Overrides
 
@@ -233,6 +181,7 @@ class TerminalWindow: NSWindow {
         stackView.setHuggingPriority(.defaultHigh, for: .horizontal)
         stackView.spacing = 4
         stackView.alignment = .centerY
+        stackView.addArrangedSubview(tabProgressIndicator)
         stackView.addArrangedSubview(tabColorIndicator)
         stackView.addArrangedSubview(keyEquivalentLabel)
         stackView.addArrangedSubview(resetZoomTabButton)
@@ -913,55 +862,29 @@ extension TerminalWindow: TabTitleEditorDelegate {
     }
 }
 
-// MARK: - Tab Progress Bar
+// MARK: - Tab Progress Indicator
 
-/// A Core Animation layer that renders a bouncing indeterminate progress bar,
-/// intended to be attached to the bottom of an NSTabButton.
-class TabProgressBarLayer: CALayer {
-    private let barLayer = CALayer()
-    private let bgLayer = CALayer()
+/// A small bouncing progress bar displayed in the tab accessory view.
+private struct TabProgressIndicatorView: View {
+    @State private var position: CGFloat = 0
 
-    override init() {
-        super.init()
-        setup()
-    }
+    var body: some View {
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 1.5)
+                .fill(Color.accentColor.opacity(0.2))
 
-    override init(layer: Any) {
-        super.init(layer: layer)
-    }
-
-    required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        setup()
-    }
-
-    private func setup() {
-        let color = NSColor.controlAccentColor
-        bgLayer.backgroundColor = color.withAlphaComponent(0.15).cgColor
-        addSublayer(bgLayer)
-        barLayer.backgroundColor = color.cgColor
-        barLayer.cornerRadius = 1
-        addSublayer(barLayer)
-    }
-
-    override func layoutSublayers() {
-        super.layoutSublayers()
-        bgLayer.frame = bounds
-    }
-
-    func startBouncing() {
-        barLayer.removeAllAnimations()
-        let barWidth = max(bounds.width * 0.25, 20)
-        let maxX = max(bounds.width - barWidth, 0)
-        barLayer.frame = CGRect(x: 0, y: 0, width: barWidth, height: bounds.height)
-
-        let anim = CABasicAnimation(keyPath: "position.x")
-        anim.fromValue = barWidth / 2
-        anim.toValue = maxX + barWidth / 2
-        anim.duration = 1.2
-        anim.autoreverses = true
-        anim.repeatCount = .infinity
-        anim.timingFunction = CAMediaTimingFunction(controlPoints: 0.42, 0, 0.58, 1)
-        barLayer.add(anim, forKey: "bounce")
+            GeometryReader { geo in
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(Color.accentColor)
+                    .frame(width: geo.size.width * 0.4)
+                    .offset(x: position * geo.size.width * 0.6)
+            }
+        }
+        .frame(width: 32, height: 3)
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true)) {
+                position = 1
+            }
+        }
     }
 }
