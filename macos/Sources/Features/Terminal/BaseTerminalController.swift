@@ -816,8 +816,10 @@ class BaseTerminalController: NSWindowController,
             // If we have a surface, we want to listen for title and pwd changes.
             titleSurface.$title
                 .combineLatest(titleSurface.$bell, titleSurface.$pwd)
-                .map { [weak self] in self?.computeTitle(title: $0, bell: $1, pwd: $2) ?? "" }
-                .sink { [weak self] in self?.titleDidChange(to: $0) }
+                .map { [weak self] (title: String, bell: Bool, pwd: String?) -> String in
+                    self?.computeTitle(title: title, bell: bell, pwd: pwd) ?? ""
+                }
+                .sink { [weak self] newTitle in self?.titleDidChange(to: newTitle) }
                 .store(in: &focusedSurfaceCancellables)
         } else {
             // There is no surface to listen to titles for.
