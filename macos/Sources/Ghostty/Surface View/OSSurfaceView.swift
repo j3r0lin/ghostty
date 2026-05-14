@@ -31,6 +31,9 @@ extension Ghostty {
         // The progress report (if any)
         @Published var progressReport: Action.ProgressReport?
 
+        // The detected CLI agent (if any) running in this terminal
+        @Published var detectedAgent: CLIAgent?
+
         // The currently active key tables. Empty if no tables are active.
         @Published var keyTables: [String] = []
 

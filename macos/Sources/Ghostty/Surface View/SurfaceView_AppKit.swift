@@ -195,6 +195,9 @@ extension Ghostty {
         // Timer to remove progress report after 15 seconds
         private var progressReportTimer: Timer?
 
+        // Timer for periodic CLI agent detection
+        private var agentDetectionTimer: Timer?
+
         // This is the title from the terminal. This is nil if we're currently using
         // the terminal title as the main title property. If the title is set manually
         // by the user, this is set to the prior value (which may be empty, but non-nil).
@@ -352,6 +355,12 @@ extension Ghostty {
             }
             self.surfaceModel = Ghostty.Surface(cSurface: surface)
 
+            // Start CLI agent detection polling
+            agentDetectionTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
+                self?.detectCLIAgent()
+            }
+            detectCLIAgent()
+
             // Setup our tracking area so we get mouse moved events
             updateTrackingAreas()
 
@@ -388,6 +397,18 @@ extension Ghostty {
 
             // Cancel progress report timer
             progressReportTimer?.invalidate()
+
+            // Cancel agent detection timer
+            agentDetectionTimer?.invalidate()
+        }
+
+        private func detectCLIAgent() {
+            guard let pid = surfaceModel?.foregroundPID else {
+                if detectedAgent != nil { detectedAgent = nil }
+                return
+            }
+            let agent = CLIAgentDetector.detect(fromPID: pid)
+            if agent != detectedAgent { detectedAgent = agent }
         }
 
         override func endSearch() {
