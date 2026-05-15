@@ -155,6 +155,32 @@ extension Ghostty {
             return Float(v)
         }
 
+        var desktopNotificationStyle: DesktopNotificationStyle {
+            guard let config = self.config else { return .auto }
+            var v: UnsafePointer<Int8>?
+            let key = "desktop-notification-style"
+            guard ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8))) else { return .auto }
+            guard let ptr = v else { return .auto }
+            return DesktopNotificationStyle(rawValue: String(cString: ptr)) ?? .auto
+        }
+
+        var notificationRingStyle: NotificationRingStyle {
+            guard let config = self.config else { return .rotatingGlow }
+            var v: UnsafePointer<Int8>?
+            let key = "notification-ring-style"
+            guard ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8))) else { return .rotatingGlow }
+            guard let ptr = v else { return .rotatingGlow }
+            return NotificationRingStyle(rawValue: String(cString: ptr)) ?? .rotatingGlow
+        }
+
+        var notificationRingWidth: CGFloat {
+            guard let config = self.config else { return 1.5 }
+            var v: Double = 0
+            let key = "notification-ring-width"
+            guard ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8))) else { return 1.5 }
+            return CGFloat(v)
+        }
+
         var notifyOnCommandFinish: NotifyOnCommandFinish {
             guard let config = self.config else { return .never }
             var v: UnsafePointer<Int8>?
@@ -389,6 +415,16 @@ extension Ghostty {
             return MacOSTitlebarProxyIcon(rawValue: str) ?? defaultValue
         }
 
+        var macosTabActiveIndicator: MacTabActiveIndicator {
+            let defaultValue = MacTabActiveIndicator.none
+            guard let config = self.config else { return defaultValue }
+            var v: UnsafePointer<Int8>?
+            let key = "macos-tab-active-indicator"
+            guard ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8))) else { return defaultValue }
+            guard let ptr = v else { return defaultValue }
+            return MacTabActiveIndicator(rawValue: String(cString: ptr)) ?? defaultValue
+        }
+
         var macosDockDropBehavior: MacDockDropBehavior {
             let defaultValue = MacDockDropBehavior.new_tab
             guard let config = self.config else { return defaultValue }
@@ -407,16 +443,6 @@ extension Ghostty {
             _ = ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8)))
             return v
         }
-        var macosTabActiveIndicator: MacTabActiveIndicator {
-            let defaultValue = MacTabActiveIndicator.none
-            guard let config = self.config else { return defaultValue }
-            var v: UnsafePointer<Int8>?
-            let key = "macos-tab-active-indicator"
-            guard ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8))) else { return defaultValue }
-            guard let ptr = v else { return defaultValue }
-            return MacTabActiveIndicator(rawValue: String(cString: ptr)) ?? defaultValue
-        }
-
 
         var macosIcon: MacOSIcon {
             let defaultValue = MacOSIcon.official
@@ -942,6 +968,19 @@ extension Ghostty.Config {
         case always
     }
 
+    enum DesktopNotificationStyle: String {
+        case auto
+        case toast
+        case native
+    }
+
+    enum NotificationRingStyle: String {
+        case off
+        case rotating
+        case rotatingGlow = "rotating-glow"
+        case rotatingBreathe = "rotating-breathe"
+    }
+
     struct NotifyOnCommandFinishAction: OptionSet {
         let rawValue: CUnsignedInt
 
@@ -953,7 +992,6 @@ extension Ghostty.Config {
         static let `default` = MacOSTitlebarStyle.transparent
         case native, transparent, tabs, hidden
     }
-}
 
     enum MacTabActiveIndicator: String {
         case none
@@ -968,3 +1006,4 @@ extension Ghostty.Config {
         case sideFade = "side-fade"
         case shadowLift = "shadow-lift"
     }
+}

@@ -43,7 +43,7 @@ extension Ghostty {
         /// Ordered queue of surface UUIDs with unread desktop notifications.
         /// Newest entries are appended at the end; oldest are at the front.
         /// A surface appears at most once (re-notification moves it to the end).
-        var unreadNotificationSurfaceIDs: [UUID] = []
+        @Published var unreadNotificationSurfaceIDs: [UUID] = []
 
         /// UUID of the surface that emitted the most recent desktop notification.
         var lastNotificationSurfaceID: UUID? {
@@ -1407,7 +1407,9 @@ extension Ghostty {
                 guard let surfaceView = self.surfaceView(from: surface) else { return }
                 guard let title = String(cString: n.title!, encoding: .utf8) else { return }
                 guard let body = String(cString: n.body!, encoding: .utf8) else { return }
-                showDesktopNotification(surfaceView, title: title, body: body)
+                let agent = String(cString: n.agent!, encoding: .utf8).flatMap { $0.isEmpty ? nil : $0 }
+                let state = String(cString: n.state!, encoding: .utf8).flatMap { $0.isEmpty ? nil : $0 }
+                showDesktopNotification(surfaceView, title: title, body: body, agent: agent, state: state)
 
             default:
                 assertionFailure()
@@ -1418,6 +1420,8 @@ extension Ghostty {
             _ surfaceView: SurfaceView,
             title: String,
             body: String,
+            agent: String? = nil,
+            state: String? = nil,
             requireFocus: Bool = true) {
             let center = UNUserNotificationCenter.current()
             center.requestAuthorization(options: [.alert, .sound]) { _, error in
@@ -1428,14 +1432,11 @@ extension Ghostty {
 
             center.getNotificationSettings { settings in
                 guard settings.authorizationStatus == .authorized else { return }
-                // getNotificationSettings invokes its completion on a background
-                // queue; hop to main before touching AppKit/SwiftUI in
-                // showUserNotification (which creates an NSHostingView for the
-                // in-app toast path).
                 DispatchQueue.main.async {
                     surfaceView.showUserNotification(
                         title: title,
                         body: body,
+                        agentState: state,
                         requireFocus: requireFocus
                     )
                 }

@@ -661,6 +661,8 @@ typedef enum {
 typedef struct {
   const char* title;
   const char* body;
+  const char* agent;
+  const char* state;
 } ghostty_action_desktop_notification_s;
 
 // apprt.action.SetTitle.C

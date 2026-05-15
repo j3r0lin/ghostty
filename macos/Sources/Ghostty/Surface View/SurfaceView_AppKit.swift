@@ -388,6 +388,11 @@ extension Ghostty {
             let identifiers = Array(self.notificationIdentifiers)
             UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: identifiers)
 
+            // Remove from unread notification queue
+            if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
+                appDelegate.ghostty.removeUnreadNotification(surfaceID: self.id)
+            }
+
             // Cancel progress report timer
             progressReportTimer?.invalidate()
 
@@ -440,6 +445,11 @@ extension Ghostty {
                         .removeDeliveredNotifications(
                             withIdentifiers: Array(notificationIdentifiers))
                     self.notificationIdentifiers = []
+                }
+
+                // Clear unread notification ring for this surface.
+                if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
+                    appDelegate.ghostty.removeUnreadNotification(surfaceID: self.id)
                 }
             }
         }
@@ -1702,27 +1712,34 @@ extension Ghostty {
         ///     the agent's brand icon on the left.
         ///   - Else (user is in another app) show a system notification so it
         ///     reaches them through the OS notification UI.
-        func showUserNotification(title: String, body: String, requireFocus: Bool = true) {
-            if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
-                appDelegate.ghostty.appendUnreadNotification(surfaceID: self.id)
-            }
-
+        func showUserNotification(title: String, body: String, agentState: String? = nil, requireFocus: Bool = true) {
             let ghosttyActive = NSApp.isActive
             let surfaceVisible =
                 self.focused && (self.window?.isKeyWindow ?? false) && ghosttyActive
 
+            // Only show notification ring for agent "waiting" state.
+            if agentState == "waiting" && !surfaceVisible {
+                if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
+                    appDelegate.ghostty.appendUnreadNotification(surfaceID: self.id)
+                }
+            }
+
             // Skip entirely when the user is already watching this surface.
             if requireFocus && surfaceVisible { return }
 
-            // The OSC 777 title is expected to carry the surface activity
-            // (callers like cc's stop-notify hook pass the conversation
-            // title as the OSC 777 title). The subtitle slot is filled with
-            // the last two path components of the surface's cwd so the user
-            // sees the work context alongside the title. This deliberately
-            // mirrors the cwd suffix shown in the tab/window title.
             let cwdSubtitle = self.pwd?.shortenedPath(components: 2) ?? ""
 
-            if ghosttyActive {
+            let style = (NSApplication.shared.delegate as? AppDelegate)?
+                .ghostty.config.desktopNotificationStyle ?? .auto
+
+            let useToast: Bool
+            switch style {
+            case .toast: useToast = true
+            case .native: useToast = false
+            case .auto: useToast = ghosttyActive
+            }
+
+            if useToast {
                 let toast = NotificationToast(
                     title: title,
                     subtitle: cwdSubtitle,
@@ -1734,8 +1751,6 @@ extension Ghostty {
                 return
             }
 
-            // Ghostty is in the background: fall back to a standard macOS
-            // notification so the user sees it from whatever app they're in.
             let content = UNMutableNotificationContent()
             content.title = title
             content.subtitle = cwdSubtitle
@@ -1746,6 +1761,9 @@ extension Ghostty {
                 "surface": self.id.uuidString,
                 "requireFocus": requireFocus,
             ]
+            if let attachment = detectedAgent?.notificationAttachment() {
+                content.attachments = [attachment]
+            }
 
             let uuid = UUID().uuidString
             let request = UNNotificationRequest(

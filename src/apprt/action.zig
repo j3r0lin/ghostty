@@ -467,7 +467,7 @@ pub const Action = union(Key) {
         // so we can change this but I want to be aware of it.
         assert(@sizeOf(CValue) == switch (@sizeOf(usize)) {
             4 => 16,
-            8 => 24,
+            8 => 32,
             else => unreachable,
         });
     }
@@ -754,17 +754,23 @@ pub const Pwd = struct {
 pub const DesktopNotification = struct {
     title: [:0]const u8,
     body: [:0]const u8,
+    agent: [:0]const u8,
+    state: [:0]const u8,
 
     // Sync with: ghostty_action_desktop_notification_s
     pub const C = extern struct {
         title: [*:0]const u8,
         body: [*:0]const u8,
+        agent: [*:0]const u8,
+        state: [*:0]const u8,
     };
 
     pub fn cval(self: DesktopNotification) C {
         return .{
             .title = self.title.ptr,
             .body = self.body.ptr,
+            .agent = self.agent.ptr,
+            .state = self.state.ptr,
         };
     }
 
@@ -774,10 +780,12 @@ pub const DesktopNotification = struct {
         _: std.fmt.FormatOptions,
         writer: *std.Io.Writer,
     ) !void {
-        try writer.print("{s}{{ title: {s}, body: {s} }}", .{
+        try writer.print("{s}{{ title: {s}, body: {s}, agent: {s}, state: {s} }}", .{
             @typeName(@This()),
             value.title,
             value.body,
+            value.agent,
+            value.state,
         });
     }
 };

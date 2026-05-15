@@ -1,6 +1,8 @@
 import AppKit
 import Darwin
 import Foundation
+import UniformTypeIdentifiers
+import UserNotifications
 
 enum CLIAgent: String, CaseIterable, Equatable {
     case claude
@@ -69,6 +71,42 @@ enum CLIAgent: String, CaseIterable, Equatable {
             return img
         }
         return NSImage(data: svgData)
+    }
+
+    private static var cachedIconURLs: [CLIAgent: URL] = [:]
+
+    func notificationAttachment() -> UNNotificationAttachment? {
+        let fileURL: URL
+        if let cached = Self.cachedIconURLs[self] {
+            fileURL = cached
+        } else {
+            guard let image = iconImage(),
+                  let tiff = image.tiffRepresentation,
+                  let rep = NSBitmapImageRep(data: tiff),
+                  let png = rep.representation(using: .png, properties: [:])
+            else { return nil }
+
+            let dir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+                .appendingPathComponent("ghostty-notif-icons", isDirectory: true)
+            do {
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                let url = dir.appendingPathComponent("\(rawValue).png")
+                try png.write(to: url, options: .atomic)
+                Self.cachedIconURLs[self] = url
+                fileURL = url
+            } catch {
+                return nil
+            }
+        }
+
+        return try? UNNotificationAttachment(
+            identifier: "",
+            url: fileURL,
+            options: [
+                UNNotificationAttachmentOptionsTypeHintKey: UTType.png.identifier,
+                UNNotificationAttachmentOptionsThumbnailHiddenKey: false,
+            ]
+        )
     }
 
     // Anthropic starburst logo

@@ -3703,6 +3703,36 @@ else
 /// notifications using certain escape sequences such as OSC 9 or OSC 777.
 @"desktop-notifications": bool = true,
 
+/// Controls how desktop notifications are displayed when Ghostty is the
+/// active application. Valid values:
+///
+///   * `auto` (default) - Show an in-app toast when Ghostty is focused,
+///      fall back to a system notification when Ghostty is in the background.
+///   * `toast` - Always use the in-app toast, even when Ghostty is in the
+///      background.
+///   * `native` - Always use the native macOS notification center.
+///
+/// This is a macOS-only option.
+@"desktop-notification-style": DesktopNotificationStyle = .auto,
+
+/// Controls the visual style of the notification ring shown around
+/// terminal panes that have unread desktop notifications.
+///
+/// Available values:
+///
+///   * `off` - No notification ring is shown.
+///   * `rotating` - A rotating light band sweeps around the border.
+///   * `rotating-glow` - Same rotation with a persistent dim border.
+///   * `rotating-breathe` - Rotation combined with a breathing glow.
+///
+/// This is a macOS-only option.
+@"notification-ring-style": NotificationRingStyle = .@"rotating-glow",
+
+/// Line width for the notification ring border in pixels.
+///
+/// This is a macOS-only option.
+@"notification-ring-width": f64 = 1.5,
+
 /// If `true` (default), applications running in the terminal can show
 /// graphical progress bars using the ConEmu OSC 9;4 escape sequence.
 /// If `false`, progress bar sequences are silently ignored.
@@ -5296,6 +5326,19 @@ pub const WindowPaddingColor = enum {
 pub const WindowSubtitle = enum {
     false,
     @"working-directory",
+};
+
+pub const DesktopNotificationStyle = enum {
+    auto,
+    toast,
+    native,
+};
+
+pub const NotificationRingStyle = enum {
+    off,
+    rotating,
+    @"rotating-glow",
+    @"rotating-breathe",
 };
 
 pub const LinkPreviews = enum {
@@ -7245,6 +7288,12 @@ pub const Keybinds = struct {
                 .{ .key = .{ .unicode = 'g' }, .mods = .{ .super = true, .alt = true } },
                 .{ .focus_last_notification_source = {} },
             );
+
+            try self.set.put(
+                alloc,
+                .{ .key = .{ .unicode = 'g' }, .mods = .{ .super = true, .alt = true, .shift = true } },
+                .{ .focus_next_unread_notification = {} },
+            );
         }
     }
 
@@ -7263,12 +7312,6 @@ pub const Keybinds = struct {
             copy = buf;
 
             @memcpy(buf, value);
-
-            try self.set.put(
-                alloc,
-                .{ .key = .{ .unicode = 'g' }, .mods = .{ .super = true, .alt = true, .shift = true } },
-                .{ .focus_next_unread_notification = {} },
-            );
             break :value buf;
         };
         errdefer if (copy) |v| alloc.free(v);
@@ -9049,6 +9092,21 @@ pub const MacTitlebarProxyIcon = enum {
     hidden,
 };
 
+/// See macos-tab-active-indicator
+pub const MacTabActiveIndicator = enum {
+    none,
+    @"bottom-line",
+    @"lighter-bg",
+    @"top-line",
+    @"floating-card",
+    @"background-tint",
+    @"tint-line",
+    @"inner-glow",
+    @"connected-tab",
+    @"side-fade",
+    @"shadow-lift",
+};
+
 /// See macos-hidden
 pub const MacHidden = enum {
     never,
@@ -9092,21 +9150,6 @@ pub const MacShortcuts = enum {
 /// See gtk-single-instance
 pub const GtkSingleInstance = enum {
     false,
-/// See macos-tab-active-indicator
-pub const MacTabActiveIndicator = enum {
-    none,
-    @"bottom-line",
-    @"lighter-bg",
-    @"top-line",
-    @"floating-card",
-    @"background-tint",
-    @"tint-line",
-    @"inner-glow",
-    @"connected-tab",
-    @"side-fade",
-    @"shadow-lift",
-};
-
     true,
     detect,
 

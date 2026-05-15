@@ -58,6 +58,12 @@ pub const Message = union(enum) {
 
         /// Desktop notification body.
         body: [255:0]u8,
+
+        /// Agent name from OSC 777 (empty string if not provided).
+        agent: [31:0]u8,
+
+        /// Agent state from OSC 777 (empty string if not provided).
+        state: [31:0]u8,
     },
 
     /// Health status change for the renderer.

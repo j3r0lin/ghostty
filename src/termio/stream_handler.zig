@@ -326,7 +326,7 @@ pub const StreamHandler = struct {
             .decaln => try self.decaln(),
             .window_title => try self.windowTitle(value.title),
             .report_pwd => try self.reportPwd(value.url),
-            .show_desktop_notification => try self.showDesktopNotification(value.title, value.body),
+            .show_desktop_notification => try self.showDesktopNotification(value.title, value.body, value.agent, value.state),
             .progress_report => self.progressReport(value),
             .start_hyperlink => try self.startHyperlink(value.uri, value.id),
             .clipboard_contents => try self.clipboardContents(value.kind, value.data),
@@ -1433,6 +1433,8 @@ pub const StreamHandler = struct {
         self: *StreamHandler,
         title: []const u8,
         body: []const u8,
+        agent: []const u8,
+        state: []const u8,
     ) !void {
         var message = apprt.surface.Message{ .desktop_notification = undefined };
 
@@ -1443,6 +1445,14 @@ pub const StreamHandler = struct {
         const body_len = @min(body.len, message.desktop_notification.body.len);
         @memcpy(message.desktop_notification.body[0..body_len], body[0..body_len]);
         message.desktop_notification.body[body_len] = 0;
+
+        const agent_len = @min(agent.len, message.desktop_notification.agent.len);
+        @memcpy(message.desktop_notification.agent[0..agent_len], agent[0..agent_len]);
+        message.desktop_notification.agent[agent_len] = 0;
+
+        const state_len = @min(state.len, message.desktop_notification.state.len);
+        @memcpy(message.desktop_notification.state[0..state_len], state[0..state_len]);
+        message.desktop_notification.state[state_len] = 0;
 
         self.surfaceMessageWriter(message);
     }

@@ -95,6 +95,8 @@ pub const Command = union(Key) {
     show_desktop_notification: struct {
         title: [:0]const u8,
         body: [:0]const u8,
+        agent: ?[:0]const u8 = null,
+        state: ?[:0]const u8 = null,
     },
 
     /// Start a hyperlink (OSC 8)
@@ -234,7 +236,7 @@ pub const Command = union(Key) {
     comptime {
         assert(@sizeOf(Command) == switch (@sizeOf(usize)) {
             4 => 44,
-            8 => 64,
+            8 => 72,
             else => unreachable,
         });
     }

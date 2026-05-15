@@ -1092,7 +1092,9 @@ pub fn handleMessage(self: *Surface, msg: Message) !void {
 
             const title = std.mem.sliceTo(&notification.title, 0);
             const body = std.mem.sliceTo(&notification.body, 0);
-            try self.showDesktopNotification(title, body);
+            const agent = std.mem.sliceTo(&notification.agent, 0);
+            const state = std.mem.sliceTo(&notification.state, 0);
+            try self.showDesktopNotification(title, body, agent, state);
         },
 
         .renderer_health => |health| self.updateRendererHealth(health),
@@ -6182,7 +6184,7 @@ fn completeClipboardReadOSC52(
     ), .unlocked);
 }
 
-fn showDesktopNotification(self: *Surface, title: [:0]const u8, body: [:0]const u8) !void {
+fn showDesktopNotification(self: *Surface, title: [:0]const u8, body: [:0]const u8, agent: [:0]const u8, state: [:0]const u8) !void {
     // Wyhash is used to hash the contents of the desktop notification to limit
     // how fast identical notifications can be sent sequentially.
     const hash_algorithm = std.hash.Wyhash;
@@ -6224,6 +6226,8 @@ fn showDesktopNotification(self: *Surface, title: [:0]const u8, body: [:0]const 
         .{
             .title = title,
             .body = body,
+            .agent = agent,
+            .state = state,
         },
     );
 }

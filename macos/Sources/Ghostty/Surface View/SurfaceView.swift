@@ -174,6 +174,13 @@ extension Ghostty {
                     BellBorderOverlay(bell: surfaceView.bell)
                 }
 
+                // Show blue ring when this surface has unread notifications
+                NotificationRingOverlay(
+                    hasUnread: ghostty.unreadNotificationSurfaceIDs.contains(surfaceView.id),
+                    style: ghostty.config.notificationRingStyle,
+                    lineWidth: ghostty.config.notificationRingWidth
+                )
+
                 // Show a highlight effect when this surface needs attention
                 HighlightOverlay(highlighted: surfaceView.highlighted)
 
@@ -960,6 +967,126 @@ extension Ghostty {
                 .allowsHitTesting(false)
                 .opacity(bell ? 1.0 : 0.0)
                 .animation(.easeInOut(duration: 0.3), value: bell)
+        }
+    }
+
+    struct NotificationRingOverlay: View {
+        let hasUnread: Bool
+        let style: Config.NotificationRingStyle
+        let lineWidth: CGFloat
+
+        var body: some View {
+            if hasUnread && style != .off {
+                Group {
+                    switch style {
+                    case .rotating: RotatingRing(lineWidth: lineWidth)
+                    case .rotatingGlow: RotatingGlowRing(lineWidth: lineWidth)
+                    case .rotatingBreathe: RotatingBreatheRing(lineWidth: lineWidth)
+                    case .off: EmptyView()
+                    }
+                }
+                .allowsHitTesting(false)
+                .transition(.opacity.animation(.easeInOut(duration: 0.3)))
+            }
+        }
+    }
+
+    private struct RotatingRing: View {
+        let lineWidth: CGFloat
+
+        var body: some View {
+            TimelineView(.animation(minimumInterval: 1.0 / 15.0)) { tl in
+                let t = tl.date.timeIntervalSinceReferenceDate
+                let angle = Angle.degrees(t.truncatingRemainder(dividingBy: 4.0) / 4.0 * 360)
+
+                Rectangle()
+                    .strokeBorder(
+                        AngularGradient(
+                            gradient: Gradient(colors: [
+                                Color.blue.opacity(0.8),
+                                Color.blue.opacity(0.1),
+                                Color.clear,
+                                Color.clear,
+                                Color.clear,
+                                Color.blue.opacity(0.1),
+                                Color.blue.opacity(0.8),
+                            ]),
+                            center: .center,
+                            angle: angle
+                        ),
+                        lineWidth: lineWidth
+                    )
+                    .shadow(color: Color.blue.opacity(0.2), radius: 4)
+            }
+        }
+    }
+
+    private struct RotatingGlowRing: View {
+        let lineWidth: CGFloat
+
+        var body: some View {
+            TimelineView(.animation(minimumInterval: 1.0 / 15.0)) { tl in
+                let t = tl.date.timeIntervalSinceReferenceDate
+                let angle = Angle.degrees(t.truncatingRemainder(dividingBy: 5.0) / 5.0 * 360)
+
+                ZStack {
+                    Rectangle()
+                        .strokeBorder(Color.blue.opacity(0.2), lineWidth: max(lineWidth - 0.5, 0.5))
+                    Rectangle()
+                        .strokeBorder(
+                            AngularGradient(
+                                gradient: Gradient(colors: [
+                                    Color.blue.opacity(0.7),
+                                    Color.blue.opacity(0.3),
+                                    Color.clear,
+                                    Color.clear,
+                                    Color.blue.opacity(0.3),
+                                    Color.blue.opacity(0.7),
+                                ]),
+                                center: .center,
+                                angle: angle
+                            ),
+                            lineWidth: lineWidth
+                        )
+                        .shadow(color: Color.blue.opacity(0.3), radius: 5)
+                }
+            }
+        }
+    }
+
+    private struct RotatingBreatheRing: View {
+        let lineWidth: CGFloat
+
+        var body: some View {
+            TimelineView(.animation(minimumInterval: 1.0 / 15.0)) { tl in
+                let t = tl.date.timeIntervalSinceReferenceDate
+                let angle = Angle.degrees(t.truncatingRemainder(dividingBy: 6.0) / 6.0 * 360)
+                let p = (sin(t * 2.0) + 1.0) / 2.0
+
+                ZStack {
+                    Rectangle()
+                        .strokeBorder(
+                            AngularGradient(
+                                gradient: Gradient(colors: [
+                                    Color.blue.opacity(0.6),
+                                    Color.blue.opacity(0.1),
+                                    Color.clear,
+                                    Color.clear,
+                                    Color.clear,
+                                    Color.clear,
+                                    Color.blue.opacity(0.1),
+                                    Color.blue.opacity(0.6),
+                                ]),
+                                center: .center,
+                                angle: angle
+                            ),
+                            lineWidth: lineWidth
+                        )
+                    Rectangle()
+                        .strokeBorder(Color.blue.opacity(0.1 + p * 0.15), lineWidth: max(lineWidth - 0.5, 0.5))
+                        .shadow(color: Color.blue.opacity(p * 0.25), radius: p * 4)
+                }
+            }
         }
     }
 
