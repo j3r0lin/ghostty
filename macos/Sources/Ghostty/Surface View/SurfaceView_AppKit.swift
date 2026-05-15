@@ -1716,10 +1716,18 @@ extension Ghostty {
             // Skip entirely when the user is already watching this surface.
             if requireFocus && surfaceVisible { return }
 
+            // The OSC 777 title is expected to carry the surface activity
+            // (callers like cc's stop-notify hook pass the conversation
+            // title as the OSC 777 title). The subtitle slot is filled with
+            // the last two path components of the surface's cwd so the user
+            // sees the work context alongside the title. This deliberately
+            // mirrors the cwd suffix shown in the tab/window title.
+            let cwdSubtitle = self.pwd?.shortenedPath(components: 2) ?? ""
+
             if ghosttyActive {
                 let toast = NotificationToast(
                     title: title,
-                    subtitle: self.window?.title ?? self.title,
+                    subtitle: cwdSubtitle,
                     body: body,
                     agent: detectedAgent,
                     surfaceID: self.id
@@ -1732,7 +1740,7 @@ extension Ghostty {
             // notification so the user sees it from whatever app they're in.
             let content = UNMutableNotificationContent()
             content.title = title
-            content.subtitle = self.window?.title ?? self.title
+            content.subtitle = cwdSubtitle
             content.body = body
             content.sound = UNNotificationSound.default
             content.categoryIdentifier = Ghostty.userNotificationCategory
