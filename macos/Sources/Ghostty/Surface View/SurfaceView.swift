@@ -178,7 +178,8 @@ extension Ghostty {
                 NotificationRingOverlay(
                     hasUnread: ghostty.unreadNotificationSurfaceIDs.contains(surfaceView.id),
                     style: ghostty.config.notificationRingStyle,
-                    lineWidth: ghostty.config.notificationRingWidth
+                    lineWidth: ghostty.config.notificationRingWidth,
+                    color: ghostty.config.notificationRingColor
                 )
 
                 // Show a highlight effect when this surface needs attention
@@ -971,10 +972,10 @@ extension Ghostty {
     }
 
     struct NotificationRingOverlay: View {
-        private static let ringColor = Color.blue
         let hasUnread: Bool
         let style: Config.NotificationRingStyle
         let lineWidth: CGFloat
+        var color: Color?
 
         var body: some View {
             if hasUnread && style != .off {
@@ -986,7 +987,7 @@ extension Ghostty {
 
         @ViewBuilder
         private var ringView: some View {
-            let c = Self.ringColor
+            let c = color ?? .accentColor
             switch style {
             case .solid:
                 Rectangle().strokeBorder(c.opacity(0.5), lineWidth: lineWidth)

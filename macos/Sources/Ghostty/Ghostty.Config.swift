@@ -181,6 +181,14 @@ extension Ghostty {
             return CGFloat(v)
         }
 
+        var notificationRingColor: Color? {
+            guard let config = self.config else { return nil }
+            var color: ghostty_config_color_s = .init()
+            let key = "notification-ring-color"
+            guard ghostty_config_get(config, &color, key, UInt(key.lengthOfBytes(using: .utf8))) else { return nil }
+            return .init(red: Double(color.r) / 255, green: Double(color.g) / 255, blue: Double(color.b) / 255)
+        }
+
         var notifyOnCommandFinish: NotifyOnCommandFinish {
             guard let config = self.config else { return .never }
             var v: UnsafePointer<Int8>?

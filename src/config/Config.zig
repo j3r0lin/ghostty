@@ -3740,6 +3740,15 @@ else
 /// This is a macOS-only option.
 @"notification-ring-width": f64 = 1.5,
 
+/// Color for the notification ring. If not set, the system accent color
+/// is used.
+///
+/// This accepts the same color formats as `background` and `foreground`
+/// (e.g. `#RRGGBB`, named X11 colors).
+///
+/// This is a macOS-only option.
+@"notification-ring-color": ?Color = null,
+
 /// If `true` (default), applications running in the terminal can show
 /// graphical progress bars using the ConEmu OSC 9;4 escape sequence.
 /// If `false`, progress bar sequences are silently ignored.
