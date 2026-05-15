@@ -7212,6 +7212,12 @@ pub const Keybinds = struct {
                 .{ .key = .{ .physical = .arrow_right }, .mods = .{ .alt = true } },
                 .{ .esc = "f" },
             );
+
+            try self.set.put(
+                alloc,
+                .{ .key = .{ .unicode = 'g' }, .mods = .{ .super = true, .alt = true } },
+                .{ .focus_last_notification_source = {} },
+            );
         }
     }
 
