@@ -3273,6 +3273,33 @@ keybind: Keybinds = .{},
 /// editor, etc.
 @"macos-titlebar-proxy-icon": MacTitlebarProxyIcon = .visible,
 
+/// Visual indicator style for the active (selected) tab when multiple
+/// tabs are present. This helps distinguish the active tab from
+/// inactive ones, especially with the `tabs` titlebar style where all
+/// tabs share the same background color.
+///
+/// Valid values are:
+///
+///   * `none` - No additional indicator beyond the default system styling.
+///   * `bottom-line` - A 2px accent-colored line at the bottom of the tab.
+///   * `lighter-bg` - The active tab is brightened; inactive tabs are dimmed.
+///   * `top-line` - A 2px accent-colored line at the top of the tab.
+///   * `floating-card` - The active tab appears as a raised card with a
+///     subtle border.
+///   * `background-tint` - The active tab has an accent-colored translucent
+///     overlay.
+///   * `tint-line` - Combines `background-tint` with `bottom-line`.
+///   * `inner-glow` - A soft radial glow emanating from the tab center.
+///   * `connected-tab` - The active tab background matches the content area,
+///     with a top accent line, visually connecting tab to content.
+///   * `side-fade` - The active tab center is brightened, fading to the edges.
+///   * `shadow-lift` - The active tab appears lifted with a drop shadow.
+///
+/// The default value is `none`.
+///
+/// This is only supported on macOS.
+@"macos-tab-active-indicator": MacTabActiveIndicator = .none,
+
 /// Controls the windowing behavior when dropping a file or folder
 /// onto the Ghostty icon in the macOS dock.
 ///
@@ -9065,6 +9092,21 @@ pub const MacShortcuts = enum {
 /// See gtk-single-instance
 pub const GtkSingleInstance = enum {
     false,
+/// See macos-tab-active-indicator
+pub const MacTabActiveIndicator = enum {
+    none,
+    @"bottom-line",
+    @"lighter-bg",
+    @"top-line",
+    @"floating-card",
+    @"background-tint",
+    @"tint-line",
+    @"inner-glow",
+    @"connected-tab",
+    @"side-fade",
+    @"shadow-lift",
+};
+
     true,
     detect,
 

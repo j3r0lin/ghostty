@@ -98,6 +98,32 @@ class TerminalWindow: NSWindow {
         }
     }
 
+    private var tabActiveIndicatorLayer: TabActiveIndicatorLayer?
+
+    func attachTabActiveIndicator() {
+        let style = derivedConfig.tabActiveIndicator
+        guard style != .none else { removeTabActiveIndicator(); return }
+        if tabActiveIndicatorLayer?.style == style,
+           tabActiveIndicatorLayer?.superlayer != nil { return }
+        removeTabActiveIndicator()
+        guard let tabButton = findOwnTabButton() else { return }
+        let layer = TabActiveIndicatorLayer(style: style)
+        layer.frame = CGRect(origin: .zero, size: tabButton.bounds.size)
+        layer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+        tabButton.wantsLayer = true
+        tabButton.layer?.addSublayer(layer)
+        tabActiveIndicatorLayer = layer
+    }
+
+    func removeTabActiveIndicator() {
+        tabActiveIndicatorLayer?.removeFromSuperlayer()
+        tabActiveIndicatorLayer = nil
+    }
+
+    private func findOwnTabButton() -> NSView? {
+        tab.accessoryView?.firstSuperview(withClassName: "NSTabButton")
+    }
+
     private var tabAgentIconView: NSImageView?
 
     func reattachTabAgentIconIfNeeded() {
@@ -113,22 +139,10 @@ class TerminalWindow: NSWindow {
         tabAgentIconView = nil
 
         guard let agent = tabAgent else { return }
-        guard let accessory = tab.accessoryView else { return }
-
-        // Walk up from the accessory view to find the enclosing NSTabButton.
-        var tabButton: NSView?
-        var current: NSView? = accessory
-        while let v = current {
-            if v.className == "NSTabButton" {
-                tabButton = v
-                break
-            }
-            current = v.superview
-        }
-        guard let tabButton else { return }
+        guard let tabButton = findOwnTabButton() else { return }
 
         // Find the title label inside the NSTabButton to position relative to it.
-        let titleLabel = findDescendant(of: tabButton, className: "NSTextField")
+        let titleLabel = tabButton.firstDescendant(withClassName: "NSTextField")
 
         guard let nsImage = NSImage(data: agent.svgData) else { return }
 
@@ -151,35 +165,19 @@ class TerminalWindow: NSWindow {
         tabAgentIconView = iconView
     }
 
-    private func findDescendant(of view: NSView, className: String) -> NSView? {
-        for subview in view.subviews {
-            if subview.className == className { return subview }
-            if let found = findDescendant(of: subview, className: className) { return found }
-        }
-        return nil
-    }
-
     /// Find our own NSTabButton by walking up from our tab.accessoryView.
     func attachTabProgressLayer() {
         guard tabProgressLayer == nil else { return }
-        guard let accessory = tab.accessoryView else { return }
+        guard let tabButton = findOwnTabButton() else { return }
 
-        // Walk up from the accessory view to find the enclosing NSTabButton.
-        var current: NSView? = accessory
-        while let v = current {
-            if v.className == "NSTabButton" {
-                let layer = TabProgressBarLayer()
-                let height: CGFloat = 2
-                layer.frame = CGRect(x: 0, y: 0, width: v.bounds.width, height: height)
-                layer.autoresizingMask = [.layerWidthSizable]
-                v.wantsLayer = true
-                v.layer?.addSublayer(layer)
-                layer.startBouncing()
-                tabProgressLayer = layer
-                return
-            }
-            current = v.superview
-        }
+        let layer = TabProgressBarLayer()
+        let height: CGFloat = 2
+        layer.frame = CGRect(x: 0, y: 0, width: tabButton.bounds.width, height: height)
+        layer.autoresizingMask = [.layerWidthSizable]
+        tabButton.wantsLayer = true
+        tabButton.layer?.addSublayer(layer)
+        layer.startBouncing()
+        tabProgressLayer = layer
     }
 
     // MARK: NSWindow Overrides
@@ -314,12 +312,20 @@ class TerminalWindow: NSWindow {
     override func becomeKey() {
         super.becomeKey()
         resetZoomTabButton.contentTintColor = .controlAccentColor
+        attachTabActiveIndicator()
+        // Defensive: tab bar rebuilds (e.g. drag reorder) can leave stale layers.
+        for w in tabbedWindows ?? [] where w !== self {
+            guard let tw = w as? TerminalWindow,
+                  tw.tabActiveIndicatorLayer != nil else { continue }
+            tw.removeTabActiveIndicator()
+        }
     }
 
     override func resignKey() {
         super.resignKey()
         resetZoomTabButton.contentTintColor = .secondaryLabelColor
         tabTitleEditor.finishEditing(commit: true)
+        removeTabActiveIndicator()
     }
 
     override func becomeMain() {
@@ -702,6 +708,7 @@ class TerminalWindow: NSWindow {
         let backgroundOpacity: Double
         let macosWindowButtons: Ghostty.MacOSWindowButtons
         let macosTitlebarStyle: Ghostty.Config.MacOSTitlebarStyle
+        let tabActiveIndicator: Ghostty.Config.MacTabActiveIndicator
         let windowCornerRadius: CGFloat
 
         init() {
@@ -711,6 +718,7 @@ class TerminalWindow: NSWindow {
             self.macosWindowButtons = .visible
             self.backgroundBlur = .disabled
             self.macosTitlebarStyle = .default
+            self.tabActiveIndicator = .none
             self.windowCornerRadius = 16
         }
 
@@ -721,6 +729,7 @@ class TerminalWindow: NSWindow {
             self.macosWindowButtons = config.macosWindowButtons
             self.backgroundBlur = config.backgroundBlur
             self.macosTitlebarStyle = config.macosTitlebarStyle
+            self.tabActiveIndicator = config.macosTabActiveIndicator
 
             // Set corner radius based on macos-titlebar-style
             // Native, transparent, and hidden styles use 16pt radius
@@ -1013,5 +1022,115 @@ class TabProgressBarLayer: CALayer {
         anim.repeatCount = .infinity
         anim.timingFunction = CAMediaTimingFunction(controlPoints: 0.42, 0, 0.58, 1)
         barLayer.add(anim, forKey: "bounce")
+    }
+}
+
+// MARK: - Tab Active Indicator
+
+class TabActiveIndicatorLayer: CALayer {
+    let style: Ghostty.Config.MacTabActiveIndicator
+    private static let lineHeight: CGFloat = 2
+
+    init(style: Ghostty.Config.MacTabActiveIndicator) {
+        self.style = style
+        super.init()
+        masksToBounds = (style != .shadowLift)
+    }
+
+    override init(layer: Any) {
+        self.style = (layer as? TabActiveIndicatorLayer)?.style ?? .none
+        super.init(layer: layer)
+    }
+
+    required init?(coder: NSCoder) {
+        self.style = .none
+        super.init(coder: coder)
+    }
+
+    override func layoutSublayers() {
+        super.layoutSublayers()
+        rebuildLayers()
+    }
+
+    private func rebuildLayers() {
+        sublayers?.forEach { $0.removeFromSuperlayer() }
+        guard bounds.width > 0 else { return }
+
+        let accent = NSColor.controlAccentColor.cgColor
+        let h = Self.lineHeight
+
+        switch style {
+        case .none:
+            break
+
+        case .bottomLine:
+            addSublayer(makeLayer(accent, CGRect(x: 0, y: 0, width: bounds.width, height: h)))
+
+        case .lighterBg:
+            addSublayer(makeLayer(NSColor.white.withAlphaComponent(0.08).cgColor, bounds))
+
+        case .topLine:
+            addSublayer(makeLayer(accent, CGRect(x: 0, y: bounds.height - h, width: bounds.width, height: h)))
+
+        case .floatingCard:
+            let card = CALayer()
+            card.frame = bounds.insetBy(dx: 3, dy: 3)
+            card.backgroundColor = NSColor.white.withAlphaComponent(0.06).cgColor
+            card.borderColor = NSColor.white.withAlphaComponent(0.12).cgColor
+            card.borderWidth = 0.5
+            card.cornerRadius = 5
+            addSublayer(card)
+
+        case .backgroundTint:
+            addSublayer(makeLayer(NSColor.controlAccentColor.withAlphaComponent(0.12).cgColor, bounds))
+
+        case .tintLine:
+            addSublayer(makeLayer(NSColor.controlAccentColor.withAlphaComponent(0.12).cgColor, bounds))
+            addSublayer(makeLayer(accent, CGRect(x: 0, y: 0, width: bounds.width, height: h)))
+
+        case .innerGlow:
+            let glow = CAGradientLayer()
+            glow.type = .radial
+            glow.frame = bounds
+            glow.colors = [NSColor.white.withAlphaComponent(0.1).cgColor, NSColor.clear.cgColor]
+            glow.startPoint = CGPoint(x: 0.5, y: 0.5)
+            glow.endPoint = CGPoint(x: 1.0, y: 1.0)
+            addSublayer(glow)
+
+        case .connectedTab:
+            addSublayer(makeLayer(NSColor.windowBackgroundColor.withAlphaComponent(0.6).cgColor, bounds))
+            addSublayer(makeLayer(accent, CGRect(x: 0, y: bounds.height - h, width: bounds.width, height: h)))
+
+        case .sideFade:
+            let gradient = CAGradientLayer()
+            gradient.frame = bounds
+            gradient.colors = [
+                NSColor.white.withAlphaComponent(0).cgColor,
+                NSColor.white.withAlphaComponent(0.08).cgColor,
+                NSColor.white.withAlphaComponent(0).cgColor,
+            ]
+            gradient.startPoint = CGPoint(x: 0, y: 0.5)
+            gradient.endPoint = CGPoint(x: 1, y: 0.5)
+            addSublayer(gradient)
+
+        case .shadowLift:
+            let card = CALayer()
+            card.frame = bounds.insetBy(dx: 2, dy: 2)
+            card.backgroundColor = NSColor.white.withAlphaComponent(0.06).cgColor
+            card.cornerRadius = 4
+            card.shadowColor = NSColor.black.cgColor
+            card.shadowOpacity = 0.5
+            card.shadowRadius = 4
+            card.shadowOffset = CGSize(width: 0, height: -2)
+            card.masksToBounds = false
+            addSublayer(card)
+        }
+    }
+
+    private func makeLayer(_ color: CGColor, _ frame: CGRect) -> CALayer {
+        let l = CALayer()
+        l.backgroundColor = color
+        l.frame = frame
+        return l
     }
 }

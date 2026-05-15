@@ -407,6 +407,16 @@ extension Ghostty {
             _ = ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8)))
             return v
         }
+        var macosTabActiveIndicator: MacTabActiveIndicator {
+            let defaultValue = MacTabActiveIndicator.none
+            guard let config = self.config else { return defaultValue }
+            var v: UnsafePointer<Int8>?
+            let key = "macos-tab-active-indicator"
+            guard ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8))) else { return defaultValue }
+            guard let ptr = v else { return defaultValue }
+            return MacTabActiveIndicator(rawValue: String(cString: ptr)) ?? defaultValue
+        }
+
 
         var macosIcon: MacOSIcon {
             let defaultValue = MacOSIcon.official
@@ -944,3 +954,17 @@ extension Ghostty.Config {
         case native, transparent, tabs, hidden
     }
 }
+
+    enum MacTabActiveIndicator: String {
+        case none
+        case bottomLine = "bottom-line"
+        case lighterBg = "lighter-bg"
+        case topLine = "top-line"
+        case floatingCard = "floating-card"
+        case backgroundTint = "background-tint"
+        case tintLine = "tint-line"
+        case innerGlow = "inner-glow"
+        case connectedTab = "connected-tab"
+        case sideFade = "side-fade"
+        case shadowLift = "shadow-lift"
+    }
