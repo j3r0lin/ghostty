@@ -1413,11 +1413,17 @@ extension Ghostty {
 
             center.getNotificationSettings { settings in
                 guard settings.authorizationStatus == .authorized else { return }
-                surfaceView.showUserNotification(
-                    title: title,
-                    body: body,
-                    requireFocus: requireFocus
-                )
+                // getNotificationSettings invokes its completion on a background
+                // queue; hop to main before touching AppKit/SwiftUI in
+                // showUserNotification (which creates an NSHostingView for the
+                // in-app toast path).
+                DispatchQueue.main.async {
+                    surfaceView.showUserNotification(
+                        title: title,
+                        body: body,
+                        requireFocus: requireFocus
+                    )
+                }
             }
         }
 

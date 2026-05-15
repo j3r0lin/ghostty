@@ -286,6 +286,12 @@ class AppDelegate: NSObject,
         ])
         center.delegate = self
 
+        // Wire up the in-app toast manager so it can look up surfaces by UUID
+        // (for click-to-focus behavior).
+        NotificationToastManager.shared.surfaceLookup = { [weak self] uuid in
+            self?.findSurface(forUUID: uuid)
+        }
+
         // Observe our appearance so we can report the correct value to libghostty.
         self.appearanceObserver = NSApplication.shared.observe(
             \.effectiveAppearance,

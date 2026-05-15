@@ -1,3 +1,4 @@
+import AppKit
 import Darwin
 import Foundation
 
@@ -31,6 +32,43 @@ enum CLIAgent: String, CaseIterable, Equatable {
         case .gemini:
             return Data(Self.geminiSVG.utf8)
         }
+    }
+
+    /// The macOS bundle identifier of the agent's desktop application, if it has one.
+    /// Used for notification toast icons so we can pick up the actual app icon.
+    var appBundleID: String? {
+        switch self {
+        case .claude: "com.anthropic.claudefordesktop"
+        case .codex: "com.openai.codex"
+        case .gemini: nil
+        }
+    }
+
+    /// Name of the bundled icon resource (PNG in Resources/AgentIcons/).
+    /// Falls back to the SVG-derived image if the resource isn't found.
+    var bundledIconResource: String? {
+        switch self {
+        case .claude: "ClaudeIcon"
+        case .codex: "CodexIcon"
+        case .gemini: nil
+        }
+    }
+
+    /// Returns an icon image to display for this agent in notification toasts.
+    /// Priority:
+    ///   1. The installed desktop app's icon (so it stays in sync with the user's app).
+    ///   2. The PNG resource bundled inside Ghostty.app.
+    ///   3. The built-in SVG rendered as an image.
+    func iconImage() -> NSImage? {
+        if let bundleID = appBundleID,
+           let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+            return NSWorkspace.shared.icon(forFile: url.path)
+        }
+        if let name = bundledIconResource,
+           let img = NSImage(named: name) {
+            return img
+        }
+        return NSImage(data: svgData)
     }
 
     // Anthropic starburst logo

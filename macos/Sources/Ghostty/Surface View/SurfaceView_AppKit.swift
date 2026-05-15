@@ -1693,11 +1693,46 @@ extension Ghostty {
             promptTitle()
         }
 
-        /// Show a user notification and associate it with this surface
+        /// Show a user notification and associate it with this surface.
+        ///
+        /// Dispatch rule:
+        ///   - If `requireFocus` is true and the surface is already focused
+        ///     and Ghostty is the active app, do nothing (user is watching).
+        ///   - Else if Ghostty is the active app, show an in-app toast with
+        ///     the agent's brand icon on the left.
+        ///   - Else (user is in another app) show a system notification so it
+        ///     reaches them through the OS notification UI.
         func showUserNotification(title: String, body: String, requireFocus: Bool = true) {
+            // Record this surface so the focus_last_notification_source keybind
+            // knows where to jump. Multiple notifications keep only the latest.
+            if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
+                appDelegate.ghostty.lastNotificationSurfaceID = self.id
+            }
+
+            let ghosttyActive = NSApp.isActive
+            let surfaceVisible =
+                self.focused && (self.window?.isKeyWindow ?? false) && ghosttyActive
+
+            // Skip entirely when the user is already watching this surface.
+            if requireFocus && surfaceVisible { return }
+
+            if ghosttyActive {
+                let toast = NotificationToast(
+                    title: title,
+                    subtitle: self.window?.title ?? self.title,
+                    body: body,
+                    agent: detectedAgent,
+                    surfaceID: self.id
+                )
+                NotificationToastManager.shared.show(toast)
+                return
+            }
+
+            // Ghostty is in the background: fall back to a standard macOS
+            // notification so the user sees it from whatever app they're in.
             let content = UNMutableNotificationContent()
             content.title = title
-            content.subtitle = self.title
+            content.subtitle = self.window?.title ?? self.title
             content.body = body
             content.sound = UNNotificationSound.default
             content.categoryIdentifier = Ghostty.userNotificationCategory
@@ -1706,42 +1741,18 @@ extension Ghostty {
                 "requireFocus": requireFocus,
             ]
 
-            // Record this surface so the focus_last_notification_source keybind
-            // knows where to jump. Multiple notifications keep only the latest.
-            if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
-                appDelegate.ghostty.lastNotificationSurfaceID = self.id
-            }
-
             let uuid = UUID().uuidString
             let request = UNNotificationRequest(
                 identifier: uuid,
                 content: content,
                 trigger: nil
             )
-
-            // Note the callback may be executed on a background thread as documented
-            // so we need @MainActor since we're reading/writing view state.
             UNUserNotificationCenter.current().add(request) { @MainActor error in
                 if let error = error {
                     AppDelegate.logger.error("Error scheduling user notification: \(error)")
                     return
                 }
-
-                // We need to keep track of this notification so we can remove it
-                // under certain circumstances
                 self.notificationIdentifiers.insert(uuid)
-
-                // If we're focused then we schedule to remove the notification
-                // after a few seconds. If we gain focus we automatically remove it
-                // in focusDidChange.
-                if self.focused {
-                    Task { @MainActor [weak self] in
-                        try await Task.sleep(for: .seconds(3))
-                        self?.notificationIdentifiers.remove(uuid)
-                        UNUserNotificationCenter.current()
-                            .removeDeliveredNotifications(withIdentifiers: [uuid])
-                    }
-                }
             }
         }
 
