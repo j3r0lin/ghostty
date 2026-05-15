@@ -25,6 +25,18 @@ extension String {
         }
         return self
     }
+
+    /// Returns the last `components` path components, with `$HOME` folded
+    /// to `~`. Used to produce compact path strings for UI surfaces such as
+    /// window subtitles, notification subtitles, and tab tooltips.
+    /// Example: "/Users/jane/Workspace/github/ghostty" → "github/ghostty".
+    func shortenedPath(components: Int) -> String {
+        let cleaned = hasSuffix("/") && self != "/" ? String(dropLast()) : self
+        let display = cleaned.abbreviatedPath
+        let parts = display.split(separator: "/", omittingEmptySubsequences: true)
+        if parts.isEmpty { return display }
+        return parts.suffix(components).joined(separator: "/")
+    }
 #endif
 
     /// Converts a four-character ASCII string to its `FourCharCode` (`UInt32`) value.

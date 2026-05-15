@@ -851,23 +851,13 @@ class BaseTerminalController: NSWindowController,
         }
 
         if derivedConfig.windowSubtitle == Ghostty.WindowSubtitle.workingDirectory, let pwd = pwd {
-            let suffix = shortenedPath(pwd, components: 2)
+            let suffix = pwd.shortenedPath(components: 2)
             if !suffix.isEmpty {
                 result = "\(result) · \(suffix)"
             }
         }
 
         return result
-    }
-
-    private func shortenedPath(_ path: String, components: Int) -> String {
-        let cleaned = path.hasSuffix("/") && path != "/" ? String(path.dropLast()) : path
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let display = cleaned.hasPrefix(home) ? "~" + cleaned.dropFirst(home.count) : cleaned
-        let parts = display.split(separator: "/", omittingEmptySubsequences: true)
-        if parts.isEmpty { return display }
-        let taken = parts.suffix(components)
-        return taken.joined(separator: "/")
     }
 
     private func titleDidChange(to: String) {
