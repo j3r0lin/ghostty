@@ -1409,7 +1409,10 @@ extension Ghostty {
                 guard let body = String(cString: n.body!, encoding: .utf8) else { return }
                 let agent = String(cString: n.agent!, encoding: .utf8).flatMap { $0.isEmpty ? nil : $0 }
                 let state = String(cString: n.state!, encoding: .utf8).flatMap { $0.isEmpty ? nil : $0 }
-                showDesktopNotification(surfaceView, title: title, body: body, agent: agent, state: state)
+                let resolvedTitle = title == ClaudeCodeSession.defaultTitle
+                    ? (ClaudeCodeSession.cachedTitle(forTerminalID: surfaceView.id.uuidString) ?? title)
+                    : title
+                showDesktopNotification(surfaceView, title: resolvedTitle, body: body, agent: agent, state: state)
 
             default:
                 assertionFailure()
