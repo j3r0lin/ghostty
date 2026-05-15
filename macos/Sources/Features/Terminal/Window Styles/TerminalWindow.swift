@@ -103,11 +103,11 @@ class TerminalWindow: NSWindow {
     func attachTabActiveIndicator() {
         let style = derivedConfig.tabActiveIndicator
         guard style != .none else { removeTabActiveIndicator(); return }
-        if tabActiveIndicatorLayer?.style == style,
+        if tabActiveIndicatorLayer?.indicatorStyle == style,
            tabActiveIndicatorLayer?.superlayer != nil { return }
         removeTabActiveIndicator()
         guard let tabButton = findOwnTabButton() else { return }
-        let layer = TabActiveIndicatorLayer(style: style)
+        let layer = TabActiveIndicatorLayer(indicatorStyle: style)
         layer.frame = CGRect(origin: .zero, size: tabButton.bounds.size)
         layer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
         tabButton.wantsLayer = true
@@ -1028,22 +1028,22 @@ class TabProgressBarLayer: CALayer {
 // MARK: - Tab Active Indicator
 
 class TabActiveIndicatorLayer: CALayer {
-    let style: Ghostty.Config.MacTabActiveIndicator
+    let indicatorStyle: Ghostty.Config.MacTabActiveIndicator
     private static let lineHeight: CGFloat = 2
 
-    init(style: Ghostty.Config.MacTabActiveIndicator) {
-        self.style = style
+    init(indicatorStyle: Ghostty.Config.MacTabActiveIndicator) {
+        self.indicatorStyle = indicatorStyle
         super.init()
-        masksToBounds = (style != .shadowLift)
+        masksToBounds = (indicatorStyle != .shadowLift)
     }
 
     override init(layer: Any) {
-        self.style = (layer as? TabActiveIndicatorLayer)?.style ?? .none
+        self.indicatorStyle = (layer as? TabActiveIndicatorLayer)?.indicatorStyle ?? .none
         super.init(layer: layer)
     }
 
     required init?(coder: NSCoder) {
-        self.style = .none
+        self.indicatorStyle = .none
         super.init(coder: coder)
     }
 
@@ -1059,7 +1059,7 @@ class TabActiveIndicatorLayer: CALayer {
         let accent = NSColor.controlAccentColor.cgColor
         let h = Self.lineHeight
 
-        switch style {
+        switch indicatorStyle {
         case .none:
             break
 
