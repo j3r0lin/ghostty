@@ -129,6 +129,11 @@ pub const Action = union(Key) {
     /// notification, equivalent to clicking on the notification.
     focus_last_notification_source,
 
+    /// Focus the surface that emitted the oldest unread desktop
+    /// notification and mark it as read. Repeated invocations cycle
+    /// through all pending notifications in chronological order.
+    focus_next_unread_notification,
+
     /// Moves a tab by a relative offset.
     ///
     /// Adjusts the tab position based on `offset` (e.g., -1 for left, +1
@@ -364,6 +369,7 @@ pub const Action = union(Key) {
         toggle_visibility,
         toggle_background_opacity,
         focus_last_notification_source,
+        focus_next_unread_notification,
         move_tab,
         goto_tab,
         goto_split,

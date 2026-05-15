@@ -187,6 +187,10 @@ final class NotificationToastManager {
             Self.logger.warning("toast click: could not find surface for \(surfaceID)")
         }
 
+        if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
+            appDelegate.ghostty.removeUnreadNotification(surfaceID: surfaceID)
+        }
+
         dismiss(id: id)
     }
 }

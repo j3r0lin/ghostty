@@ -7236,6 +7236,12 @@ pub const Keybinds = struct {
             copy = buf;
 
             @memcpy(buf, value);
+
+            try self.set.put(
+                alloc,
+                .{ .key = .{ .unicode = 'g' }, .mods = .{ .super = true, .alt = true, .shift = true } },
+                .{ .focus_next_unread_notification = {} },
+            );
             break :value buf;
         };
         errdefer if (copy) |v| alloc.free(v);

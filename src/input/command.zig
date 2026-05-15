@@ -714,6 +714,7 @@ fn actionCommands(action: Action.Key) []const Command {
         .toggle_quick_terminal,
         .toggle_visibility,
         .focus_last_notification_source,
+        .focus_next_unread_notification,
         .previous_tab,
         .next_tab,
         .last_tab,

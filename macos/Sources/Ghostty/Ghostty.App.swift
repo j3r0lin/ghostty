@@ -40,10 +40,22 @@ extension Ghostty {
             }
         }
 
+        /// Ordered queue of surface UUIDs with unread desktop notifications.
+        /// Newest entries are appended at the end; oldest are at the front.
+        /// A surface appears at most once (re-notification moves it to the end).
+        var unreadNotificationSurfaceIDs: [UUID] = []
+
         /// UUID of the surface that emitted the most recent desktop notification.
-        /// Cleared when the notification is clicked/dismissed or when the
-        /// `focus_last_notification_source` keybind has been handled.
-        var lastNotificationSurfaceID: UUID?
+        var lastNotificationSurfaceID: UUID? {
+            get { unreadNotificationSurfaceIDs.last }
+            set {
+                if let id = newValue {
+                    appendUnreadNotification(surfaceID: id)
+                } else {
+                    // Setting to nil is only used by legacy paths; no-op the queue.
+                }
+            }
+        }
 
         /// True if we need to confirm before quitting.
         var needsConfirmQuit: Bool {
@@ -600,6 +612,9 @@ extension Ghostty {
 
             case GHOSTTY_ACTION_FOCUS_LAST_NOTIFICATION_SOURCE:
                 focusLastNotificationSource(app, target: target)
+
+            case GHOSTTY_ACTION_FOCUS_NEXT_UNREAD_NOTIFICATION:
+                focusNextUnreadNotification(app, target: target)
 
             case GHOSTTY_ACTION_TOGGLE_VISIBILITY:
                 toggleVisibility(app, target: target)
@@ -1613,6 +1628,15 @@ extension Ghostty {
             ghosttyApp.focusLastNotificationSource()
         }
 
+        private static func focusNextUnreadNotification(
+            _ app: ghostty_app_t,
+            target: ghostty_target_s
+        ) {
+            guard let app_ud = ghostty_app_userdata(app) else { return }
+            let ghosttyApp = Unmanaged<App>.fromOpaque(app_ud).takeUnretainedValue()
+            ghosttyApp.focusNextUnreadNotification()
+        }
+
         private static func setTitle(
             _ app: ghostty_app_t,
             target: ghostty_target_s,
@@ -2273,10 +2297,8 @@ extension Ghostty {
                   let surface = delegate?.findSurface(forUUID: uuid) else { return }
 
             // The user already responded to the notification (clicked or
-            // dismissed), so the keybind no longer has anything to do.
-            if lastNotificationSurfaceID == uuid {
-                lastNotificationSurfaceID = nil
-            }
+            // dismissed), so remove it from the unread queue.
+            removeUnreadNotification(surfaceID: uuid)
 
             switch response.actionIdentifier {
             case UNNotificationDefaultActionIdentifier, Ghostty.userNotificationActionShow:
@@ -2293,12 +2315,40 @@ extension Ghostty {
         /// Focus the surface that emitted the most recent desktop notification.
         /// This is the keybind-driven equivalent of clicking the notification.
         func focusLastNotificationSource() {
-            guard let uuid = lastNotificationSurfaceID,
-                  let surface = delegate?.findSurface(forUUID: uuid) else { return }
-            lastNotificationSurfaceID = nil
-            surface.window?.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-            Ghostty.moveFocus(to: surface)
+            while let uuid = unreadNotificationSurfaceIDs.last {
+                unreadNotificationSurfaceIDs.removeLast()
+                if let surface = delegate?.findSurface(forUUID: uuid) {
+                    surface.window?.makeKeyAndOrderFront(nil)
+                    NSApp.activate(ignoringOtherApps: true)
+                    Ghostty.moveFocus(to: surface)
+                    return
+                }
+            }
+        }
+
+        /// Focus the surface that emitted the oldest unread notification.
+        func focusNextUnreadNotification() {
+            while !unreadNotificationSurfaceIDs.isEmpty {
+                let uuid = unreadNotificationSurfaceIDs.removeFirst()
+                if let surface = delegate?.findSurface(forUUID: uuid) {
+                    surface.window?.makeKeyAndOrderFront(nil)
+                    NSApp.activate(ignoringOtherApps: true)
+                    Ghostty.moveFocus(to: surface)
+                    return
+                }
+            }
+        }
+
+        /// Add a surface to the unread notification queue, moving it to the
+        /// end if already present.
+        func appendUnreadNotification(surfaceID: UUID) {
+            unreadNotificationSurfaceIDs.removeAll { $0 == surfaceID }
+            unreadNotificationSurfaceIDs.append(surfaceID)
+        }
+
+        /// Remove a surface from the unread notification queue.
+        func removeUnreadNotification(surfaceID: UUID) {
+            unreadNotificationSurfaceIDs.removeAll { $0 == surfaceID }
         }
 
         #endif

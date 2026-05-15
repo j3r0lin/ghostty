@@ -1703,10 +1703,8 @@ extension Ghostty {
         ///   - Else (user is in another app) show a system notification so it
         ///     reaches them through the OS notification UI.
         func showUserNotification(title: String, body: String, requireFocus: Bool = true) {
-            // Record this surface so the focus_last_notification_source keybind
-            // knows where to jump. Multiple notifications keep only the latest.
             if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
-                appDelegate.ghostty.lastNotificationSurfaceID = self.id
+                appDelegate.ghostty.appendUnreadNotification(surfaceID: self.id)
             }
 
             let ghosttyActive = NSApp.isActive
