@@ -3721,12 +3721,19 @@ else
 /// Available values:
 ///
 ///   * `off` - No notification ring is shown.
-///   * `rotating` - A rotating light band sweeps around the border.
-///   * `rotating-glow` - Same rotation with a persistent dim border.
-///   * `rotating-breathe` - Rotation combined with a breathing glow.
+///   * `solid` - Uniform semi-transparent blue border.
+///   * `gradient` - Static angular gradient border.
+///   * `corners` - Highlight marks on the four corners only.
+///   * `double` - Inner and outer double border lines.
+///   * `accent` - Top and bottom highlight bars.
+///   * `left-bar` - Left-side vertical bar.
+///   * `inner-glow` - Gradient border with inner glow feel.
+///   * `dashed` - Dashed border.
+///   * `top-bar` - Top highlight bar only.
+///   * `rounded` - Rounded inset border.
 ///
 /// This is a macOS-only option.
-@"notification-ring-style": NotificationRingStyle = .@"rotating-glow",
+@"notification-ring-style": NotificationRingStyle = .solid,
 
 /// Line width for the notification ring border in pixels.
 ///
@@ -5336,9 +5343,16 @@ pub const DesktopNotificationStyle = enum {
 
 pub const NotificationRingStyle = enum {
     off,
-    rotating,
-    @"rotating-glow",
-    @"rotating-breathe",
+    solid,
+    gradient,
+    corners,
+    double,
+    accent,
+    @"left-bar",
+    @"inner-glow",
+    dashed,
+    @"top-bar",
+    rounded,
 };
 
 pub const LinkPreviews = enum {

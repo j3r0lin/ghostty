@@ -971,121 +971,102 @@ extension Ghostty {
     }
 
     struct NotificationRingOverlay: View {
+        private static let ringColor = Color.blue
         let hasUnread: Bool
         let style: Config.NotificationRingStyle
         let lineWidth: CGFloat
 
         var body: some View {
             if hasUnread && style != .off {
-                Group {
-                    switch style {
-                    case .rotating: RotatingRing(lineWidth: lineWidth)
-                    case .rotatingGlow: RotatingGlowRing(lineWidth: lineWidth)
-                    case .rotatingBreathe: RotatingBreatheRing(lineWidth: lineWidth)
-                    case .off: EmptyView()
-                    }
-                }
-                .allowsHitTesting(false)
-                .transition(.opacity.animation(.easeInOut(duration: 0.3)))
+                ringView
+                    .allowsHitTesting(false)
+                    .transition(.opacity.animation(.easeInOut(duration: 0.3)))
             }
         }
-    }
 
-    private struct RotatingRing: View {
-        let lineWidth: CGFloat
-
-        var body: some View {
-            TimelineView(.animation(minimumInterval: 1.0 / 15.0)) { tl in
-                let t = tl.date.timeIntervalSinceReferenceDate
-                let angle = Angle.degrees(t.truncatingRemainder(dividingBy: 4.0) / 4.0 * 360)
-
-                Rectangle()
-                    .strokeBorder(
-                        AngularGradient(
-                            gradient: Gradient(colors: [
-                                Color.blue.opacity(0.8),
-                                Color.blue.opacity(0.1),
-                                Color.clear,
-                                Color.clear,
-                                Color.clear,
-                                Color.blue.opacity(0.1),
-                                Color.blue.opacity(0.8),
-                            ]),
-                            center: .center,
-                            angle: angle
-                        ),
+        @ViewBuilder
+        private var ringView: some View {
+            let c = Self.ringColor
+            switch style {
+            case .solid:
+                Rectangle().strokeBorder(c.opacity(0.5), lineWidth: lineWidth)
+            case .gradient:
+                Rectangle().strokeBorder(
+                    AngularGradient(
+                        gradient: Gradient(colors: [
+                            c.opacity(0.7), c.opacity(0.2),
+                            Color.cyan.opacity(0.5), c.opacity(0.2),
+                            c.opacity(0.7),
+                        ]),
+                        center: .center
+                    ),
+                    lineWidth: lineWidth
+                )
+            case .corners:
+                NotificationRingCorners(lineWidth: lineWidth, color: c)
+            case .double:
+                ZStack {
+                    Rectangle().strokeBorder(c.opacity(0.4), lineWidth: lineWidth)
+                    Rectangle().strokeBorder(c.opacity(0.25), lineWidth: lineWidth).padding(lineWidth + 2)
+                }
+            case .accent:
+                VStack(spacing: 0) {
+                    Rectangle().fill(c.opacity(0.6)).frame(height: lineWidth)
+                    Spacer()
+                    Rectangle().fill(c.opacity(0.6)).frame(height: lineWidth)
+                }
+            case .leftBar:
+                HStack(spacing: 0) {
+                    Rectangle().fill(c.opacity(0.6)).frame(width: lineWidth)
+                    Spacer()
+                }
+            case .innerGlow:
+                ZStack {
+                    Rectangle().strokeBorder(
+                        LinearGradient(colors: [c.opacity(0.5), c.opacity(0.15)], startPoint: .top, endPoint: .bottom),
                         lineWidth: lineWidth
                     )
-                    .shadow(color: Color.blue.opacity(0.2), radius: 4)
+                    Rectangle().strokeBorder(c.opacity(0.08), lineWidth: lineWidth * 3).padding(-lineWidth)
+                }
+            case .dashed:
+                Rectangle().strokeBorder(c.opacity(0.5), style: StrokeStyle(lineWidth: lineWidth, dash: [8, 4]))
+            case .topBar:
+                VStack(spacing: 0) {
+                    Rectangle().fill(c.opacity(0.7)).frame(height: lineWidth)
+                    Spacer()
+                }
+            case .rounded:
+                RoundedRectangle(cornerRadius: 6).strokeBorder(c.opacity(0.5), lineWidth: lineWidth).padding(2)
+            case .off:
+                EmptyView()
             }
         }
     }
 
-    private struct RotatingGlowRing: View {
+    private struct NotificationRingCorners: View {
         let lineWidth: CGFloat
+        let color: Color
+        private let cornerLength: CGFloat = 20
 
         var body: some View {
-            TimelineView(.animation(minimumInterval: 1.0 / 15.0)) { tl in
-                let t = tl.date.timeIntervalSinceReferenceDate
-                let angle = Angle.degrees(t.truncatingRemainder(dividingBy: 5.0) / 5.0 * 360)
-
-                ZStack {
-                    Rectangle()
-                        .strokeBorder(Color.blue.opacity(0.2), lineWidth: max(lineWidth - 0.5, 0.5))
-                    Rectangle()
-                        .strokeBorder(
-                            AngularGradient(
-                                gradient: Gradient(colors: [
-                                    Color.blue.opacity(0.7),
-                                    Color.blue.opacity(0.3),
-                                    Color.clear,
-                                    Color.clear,
-                                    Color.blue.opacity(0.3),
-                                    Color.blue.opacity(0.7),
-                                ]),
-                                center: .center,
-                                angle: angle
-                            ),
-                            lineWidth: lineWidth
-                        )
-                        .shadow(color: Color.blue.opacity(0.3), radius: 5)
+            GeometryReader { geo in
+                let w = geo.size.width
+                let h = geo.size.height
+                Path { p in
+                    p.move(to: CGPoint(x: 0, y: cornerLength))
+                    p.addLine(to: CGPoint(x: 0, y: 0))
+                    p.addLine(to: CGPoint(x: cornerLength, y: 0))
+                    p.move(to: CGPoint(x: w - cornerLength, y: 0))
+                    p.addLine(to: CGPoint(x: w, y: 0))
+                    p.addLine(to: CGPoint(x: w, y: cornerLength))
+                    p.move(to: CGPoint(x: w, y: h - cornerLength))
+                    p.addLine(to: CGPoint(x: w, y: h))
+                    p.addLine(to: CGPoint(x: w - cornerLength, y: h))
+                    p.move(to: CGPoint(x: cornerLength, y: h))
+                    p.addLine(to: CGPoint(x: 0, y: h))
+                    p.addLine(to: CGPoint(x: 0, y: h - cornerLength))
                 }
-            }
-        }
-    }
-
-    private struct RotatingBreatheRing: View {
-        let lineWidth: CGFloat
-
-        var body: some View {
-            TimelineView(.animation(minimumInterval: 1.0 / 15.0)) { tl in
-                let t = tl.date.timeIntervalSinceReferenceDate
-                let angle = Angle.degrees(t.truncatingRemainder(dividingBy: 6.0) / 6.0 * 360)
-                let p = (sin(t * 2.0) + 1.0) / 2.0
-
-                ZStack {
-                    Rectangle()
-                        .strokeBorder(
-                            AngularGradient(
-                                gradient: Gradient(colors: [
-                                    Color.blue.opacity(0.6),
-                                    Color.blue.opacity(0.1),
-                                    Color.clear,
-                                    Color.clear,
-                                    Color.clear,
-                                    Color.clear,
-                                    Color.blue.opacity(0.1),
-                                    Color.blue.opacity(0.6),
-                                ]),
-                                center: .center,
-                                angle: angle
-                            ),
-                            lineWidth: lineWidth
-                        )
-                    Rectangle()
-                        .strokeBorder(Color.blue.opacity(0.1 + p * 0.15), lineWidth: max(lineWidth - 0.5, 0.5))
-                        .shadow(color: Color.blue.opacity(p * 0.25), radius: p * 4)
-                }
+                .stroke(color.opacity(0.6), lineWidth: lineWidth)
             }
         }
     }

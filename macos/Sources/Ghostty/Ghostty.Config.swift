@@ -165,12 +165,12 @@ extension Ghostty {
         }
 
         var notificationRingStyle: NotificationRingStyle {
-            guard let config = self.config else { return .rotatingGlow }
+            guard let config = self.config else { return .solid }
             var v: UnsafePointer<Int8>?
             let key = "notification-ring-style"
-            guard ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8))) else { return .rotatingGlow }
-            guard let ptr = v else { return .rotatingGlow }
-            return NotificationRingStyle(rawValue: String(cString: ptr)) ?? .rotatingGlow
+            guard ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8))) else { return .solid }
+            guard let ptr = v else { return .solid }
+            return NotificationRingStyle(rawValue: String(cString: ptr)) ?? .solid
         }
 
         var notificationRingWidth: CGFloat {
@@ -976,9 +976,16 @@ extension Ghostty.Config {
 
     enum NotificationRingStyle: String {
         case off
-        case rotating
-        case rotatingGlow = "rotating-glow"
-        case rotatingBreathe = "rotating-breathe"
+        case solid
+        case gradient
+        case corners
+        case double
+        case accent
+        case leftBar = "left-bar"
+        case innerGlow = "inner-glow"
+        case dashed
+        case topBar = "top-bar"
+        case rounded
     }
 
     struct NotifyOnCommandFinishAction: OptionSet {
