@@ -37,6 +37,9 @@ class TerminalWindow: NSWindow {
     /// Sets up our tab context menu
     private var tabMenuObserver: NSObjectProtocol?
 
+    /// Observes config reload so we can refresh derived state (e.g. tab active indicator style).
+    private var configChangeObserver: NSObjectProtocol?
+
     /// Handles inline tab title editing for this host window.
     private(set) lazy var tabTitleEditor = TabTitleEditor(
         hostWindow: self,
@@ -204,6 +207,31 @@ class TerminalWindow: NSWindow {
         ) { [weak self] n in
             guard let self, let menu = n.object as? NSMenu else { return }
             self.configureTabContextMenuIfNeeded(menu)
+        }
+
+        // Listen for config reloads so we can update derived state (e.g. tab indicator style).
+        configChangeObserver = NotificationCenter.default.addObserver(
+            forName: .ghosttyConfigDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self else { return }
+            // Only respond to app-level config changes (object == nil), not surface-level.
+            guard notification.object == nil else { return }
+            guard let config = notification.userInfo?[
+                Notification.Name.GhosttyConfigChangeKey
+            ] as? Ghostty.Config else { return }
+
+            let oldIndicator = self.derivedConfig.tabActiveIndicator
+            self.derivedConfig = DerivedConfig(config)
+
+            // Refresh the tab active indicator if the style changed.
+            if self.derivedConfig.tabActiveIndicator != oldIndicator {
+                self.removeTabActiveIndicator()
+                if self.isKeyWindow {
+                    self.attachTabActiveIndicator()
+                }
+            }
         }
 
         // This is required so that window restoration properly creates our tabs
@@ -695,6 +723,9 @@ class TerminalWindow: NSWindow {
 
     deinit {
         if let observer = tabMenuObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = configChangeObserver {
             NotificationCenter.default.removeObserver(observer)
         }
     }
