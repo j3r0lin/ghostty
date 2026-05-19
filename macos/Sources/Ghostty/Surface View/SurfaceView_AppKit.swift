@@ -385,16 +385,31 @@ extension Ghostty {
             guard let pid = surfaceModel?.foregroundPID else {
                 if detectedAgent != nil {
                     detectedAgent = nil
+                    detectedAgentSession = nil
                     progressReport = nil
                 }
                 return
             }
-            let agent = CLIAgentDetector.detect(fromPID: pid)
+            let result = CLIAgentDetector.detectWithPID(fromPID: pid)
+            let agent = result?.agent
             if agent != detectedAgent {
                 if detectedAgent != nil && agent == nil {
                     progressReport = nil
                 }
                 detectedAgent = agent
+
+                if let result = result,
+                   let (execPath, argv) = CLIAgentDetector.processArgv(forPID: Int(result.matchedPID)) {
+                    detectedAgentSession = CLIAgentSessionInfo(
+                        agent: result.agent, argv: argv, execPath: execPath, pid: result.matchedPID)
+                } else {
+                    detectedAgentSession = nil
+                }
+            } else if let result = result, detectedAgentSession?.pid != result.matchedPID {
+                if let (execPath, argv) = CLIAgentDetector.processArgv(forPID: Int(result.matchedPID)) {
+                    detectedAgentSession = CLIAgentSessionInfo(
+                        agent: result.agent, argv: argv, execPath: execPath, pid: result.matchedPID)
+                }
             }
         }
 

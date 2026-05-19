@@ -58,7 +58,7 @@ extension TerminalRestorable {
 
 /// The state stored for terminal window restoration.
 final class TerminalRestorableState: TerminalRestorable {
-    static var version: Int { 7 }
+    static var version: Int { 8 }
     static var minimumVersion: Int { 5 }
 
     var focusedSurface: String? {
@@ -75,6 +75,12 @@ final class TerminalRestorableState: TerminalRestorable {
     }
     var titleOverride: String? {
         internalState.titleOverride
+    }
+    var agentArgv: [String]? {
+        internalState.agentArgv
+    }
+    var agentTerminalID: String? {
+        internalState.agentTerminalID
     }
 
     /// Internal State we use to perform unit tests
@@ -151,6 +157,20 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
             return
         }
 
+        // Build agent restore command to inject into the shell after restoration.
+        // We restore the normal surface tree (shell) and send the command as
+        // initial input, so the shell has full PATH/profile and stays alive
+        // even if the command fails.
+        var agentRestoreInput: String?
+        if let agentArgv = state.agentArgv, !agentArgv.isEmpty {
+            let session = state.agentTerminalID.flatMap {
+                ClaudeCodeSession.latestSession(forTerminalID: $0)
+            }
+            if let command = agentRestoreCommand(argv: agentArgv, sessionID: session?.sessionID) {
+                agentRestoreInput = command + "\n"
+            }
+        }
+
         // The window creation has to go through our terminalManager so that it
         // can be found for events from libghostty. This uses the low-level
         // createWindow so that AppKit can place the window wherever it should
@@ -171,8 +191,7 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
         // Restore the tab title override
         c.titleOverride = state.titleOverride
 
-        // Setup our restored state on the controller
-        // Find the focused surface in surfaceTree
+        // Setup our restored state on the controller.
         if let focusedStr = state.focusedSurface {
             var foundView: Ghostty.SurfaceView?
             for view in c.surfaceTree where view.id.uuidString == focusedStr {
@@ -186,6 +205,10 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
             }
         }
 
+        if let input = agentRestoreInput, let surfaceView = c.focusedSurface {
+            sendTextWhenReady(input, to: surfaceView)
+        }
+
         completionHandler(window, nil)
         guard let mode = state.effectiveFullscreenMode, mode != .native else {
             // We let AppKit handle native fullscreen
@@ -194,6 +217,63 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
         // Give the window to AppKit first, then adjust its frame and style
         // to minimise any visible frame changes.
         c.toggleFullscreen(mode: mode)
+    }
+
+    private static func agentRestoreCommand(argv: [String], sessionID: String?) -> String? {
+        guard !argv.isEmpty else { return nil }
+
+        var parts = argv
+        var i = 0
+        while i < parts.count {
+            let flag = parts[i]
+            if flag == "--resume" || flag == "--session-id" {
+                parts.remove(at: i)
+                if i < parts.count && !parts[i].hasPrefix("-") {
+                    parts.remove(at: i)
+                }
+                continue
+            }
+            if flag == "--continue" {
+                parts.remove(at: i)
+                continue
+            }
+            i += 1
+        }
+
+        if let sessionID = sessionID, UUID(uuidString: sessionID) != nil {
+            parts.insert(contentsOf: ["--resume", sessionID], at: min(1, parts.count))
+        }
+
+        return parts.map { shellQuote($0) }.joined(separator: " ")
+    }
+
+    private static func shellQuote(_ s: String) -> String {
+        if s.isEmpty { return "''" }
+        let safe = s.allSatisfy { $0.isLetter || $0.isNumber || "-._/=:@".contains($0) }
+        return safe ? s : "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    private static func sendTextWhenReady(_ text: String, to view: Ghostty.SurfaceView, attempts: Int = 0) {
+        let after: DispatchTime
+        if attempts == 0 {
+            after = .now() + .milliseconds(200)
+        } else if attempts > 20 {
+            return
+        } else {
+            after = .now() + .milliseconds(100)
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: after) {
+            guard let surface = view.surfaceModel, view.window != nil else {
+                sendTextWhenReady(text, to: view, attempts: attempts + 1)
+                return
+            }
+            if let pid = surface.foregroundPID, pid > 0 {
+                surface.sendText(text)
+            } else {
+                sendTextWhenReady(text, to: view, attempts: attempts + 1)
+            }
+        }
     }
 
     /// This restores the focus state of the surfaceview within the given window. When restoring,

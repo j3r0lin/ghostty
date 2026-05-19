@@ -205,21 +205,62 @@ enum CLIAgent: String, CaseIterable, Equatable {
     """
 }
 
+struct CLIAgentSessionInfo: Equatable {
+    let agent: CLIAgent
+    let argv: [String]
+    let execPath: String
+    let pid: pid_t
+}
+
 enum CLIAgentDetector {
+    static func processArgv(forPID pid: Int) -> (execPath: String, argv: [String])? {
+        var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, Int32(pid)]
+        var size: Int = 0
+        guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > MemoryLayout<Int32>.size else { return nil }
+
+        let buffer = UnsafeMutableRawPointer.allocate(byteCount: size + 1, alignment: 1)
+        defer { buffer.deallocate() }
+        guard sysctl(&mib, 3, buffer, &size, nil, 0) == 0 else { return nil }
+        buffer.storeBytes(of: UInt8(0), toByteOffset: size, as: UInt8.self)
+
+        let argc = buffer.load(as: Int32.self)
+        var offset = MemoryLayout<Int32>.size
+
+        let execPath = String(cString: buffer.advanced(by: offset).assumingMemoryBound(to: CChar.self))
+        offset += execPath.utf8.count + 1
+
+        while offset < size && buffer.load(fromByteOffset: offset, as: UInt8.self) == 0 {
+            offset += 1
+        }
+
+        var argv: [String] = []
+        for _ in 0..<argc {
+            guard offset < size else { break }
+            let arg = String(cString: buffer.advanced(by: offset).assumingMemoryBound(to: CChar.self))
+            argv.append(arg)
+            offset += arg.utf8.count + 1
+        }
+
+        guard !argv.isEmpty else { return nil }
+        return (execPath, argv)
+    }
+
     static func detect(fromPID pid: Int) -> CLIAgent? {
+        detectWithPID(fromPID: pid)?.agent
+    }
+
+    static func detectWithPID(fromPID pid: Int) -> (agent: CLIAgent, matchedPID: pid_t)? {
         let startPID = Int32(pid)
 
-        // Walk up the ancestor chain.
         var currentPID = startPID
         for _ in 0..<20 {
             guard currentPID > 1 else { break }
-            if let agent = matchAgent(for: currentPID) { return agent }
+            if let agent = matchAgent(for: currentPID) { return (agent, currentPID) }
             currentPID = parentPID(of: currentPID)
         }
 
-        // Check direct children of the foreground process (e.g. node → native codex binary).
         for childPID in childPIDs(of: startPID) {
-            if let agent = matchAgent(for: childPID) { return agent }
+            if let agent = matchAgent(for: childPID) { return (agent, childPID) }
         }
 
         return nil

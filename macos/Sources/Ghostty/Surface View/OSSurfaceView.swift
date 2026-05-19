@@ -34,6 +34,9 @@ extension Ghostty {
         // The detected CLI agent (if any) running in this terminal
         @Published var detectedAgent: CLIAgent?
 
+        // The detected CLI agent session info (argv, pid) — set when agent is first detected or PID changes
+        @Published var detectedAgentSession: CLIAgentSessionInfo?
+
         // The currently active key tables. Empty if no tables are active.
         @Published var keyTables: [String] = []
 
