@@ -89,6 +89,9 @@ class BaseTerminalController: NSWindowController,
     /// Cancellable for aggregating bell state across all surfaces in this controller.
     private var bellStateCancellable: AnyCancellable?
 
+    /// Cancellable for tracking unread notification state for the tab tint.
+    private var unreadNotificationCancellable: AnyCancellable?
+
     /// An override title for the tab/window set by the user via prompt_tab_title.
     /// When set, this takes precedence over the computed title from the terminal.
     var titleOverride: String? {
@@ -143,6 +146,9 @@ class BaseTerminalController: NSWindowController,
 
         // Setup our bell state for the window
         setupBellNotificationPublisher()
+
+        // Track unread notifications to show/hide tab tint.
+        setupUnreadNotificationPublisher()
 
         // Setup our notifications for behaviors
         let center = NotificationCenter.default
@@ -1283,9 +1289,11 @@ class BaseTerminalController: NSWindowController,
                     }
                     tw.updateTabProgressVisibility()
                 }
-                // Re-attach agent icon if needed.
                 if tw.tabAgent != nil {
                     tw.reattachTabAgentIconIfNeeded()
+                }
+                if tw.tabHasUnread {
+                    tw.reattachTabUnreadTintIfNeeded()
                 }
             }
         }
@@ -1559,6 +1567,16 @@ extension BaseTerminalController {
                     object: self,
                     userInfo: [Notification.Name.terminalWindowHasBellKey: hasBell]
                 )
+            }
+    }
+
+    private func setupUnreadNotificationPublisher() {
+        unreadNotificationCancellable = ghostty.$unreadNotificationSurfaceIDs
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] unreadIDs in
+                guard let self, let tw = self.window as? TerminalWindow else { return }
+                let surfaceIDs = Set(self.surfaceTree.map(\.id))
+                tw.tabHasUnread = !surfaceIDs.isDisjoint(with: unreadIDs)
             }
     }
 

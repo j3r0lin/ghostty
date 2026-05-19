@@ -101,6 +101,93 @@ class TerminalWindow: NSWindow {
         }
     }
 
+    private var tabUnreadTintLayer: CALayer?
+    private var tabUnreadDotView: NSView?
+    private weak var hiddenShortcutLabel: NSView?
+
+    /// Whether this window's tab should show the unread notification indicator
+    /// (background tint + trailing dot that replaces the shortcut label).
+    var tabHasUnread: Bool = false {
+        didSet {
+            guard tabHasUnread != oldValue else { return }
+            if tabHasUnread {
+                attachTabUnreadIndicator()
+            } else {
+                removeTabUnreadIndicator()
+            }
+        }
+    }
+
+    private var unreadAccentColor: NSColor {
+        if let custom = derivedConfig.notificationRingColor {
+            return NSColor(custom)
+        }
+        return NSColor.controlAccentColor
+    }
+
+    private func findShortcutLabel(in tabButton: NSView) -> NSView? {
+        let textFields = tabButton.descendants(withClassName: "NSTextField")
+        guard textFields.count >= 2 else { return nil }
+        return textFields.max(by: { $0.frame.origin.x < $1.frame.origin.x })
+    }
+
+    private func attachTabUnreadIndicator() {
+        guard let tabButton = findOwnTabButton() else { return }
+        let color = unreadAccentColor
+
+        if tabUnreadTintLayer == nil {
+            let layer = CALayer()
+            layer.backgroundColor = color.withAlphaComponent(0.20).cgColor
+            layer.frame = CGRect(origin: .zero, size: tabButton.bounds.size)
+            layer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+            tabButton.wantsLayer = true
+            tabButton.layer?.addSublayer(layer)
+            tabUnreadTintLayer = layer
+        }
+
+        if tabUnreadDotView == nil {
+            if let shortcutLabel = findShortcutLabel(in: tabButton) {
+                shortcutLabel.isHidden = true
+                hiddenShortcutLabel = shortcutLabel
+            }
+
+            let dotSize: CGFloat = 7
+            let dotLayer = CALayer()
+            dotLayer.backgroundColor = color.cgColor
+            dotLayer.cornerRadius = dotSize / 2
+
+            let dot = NSView()
+            dot.wantsLayer = true
+            dot.layer = dotLayer
+            dot.translatesAutoresizingMaskIntoConstraints = false
+            tabButton.addSubview(dot)
+            NSLayoutConstraint.activate([
+                dot.trailingAnchor.constraint(equalTo: tabButton.trailingAnchor, constant: -10),
+                dot.centerYAnchor.constraint(equalTo: tabButton.centerYAnchor),
+                dot.widthAnchor.constraint(equalToConstant: dotSize),
+                dot.heightAnchor.constraint(equalToConstant: dotSize),
+            ])
+            tabUnreadDotView = dot
+        }
+    }
+
+    private func removeTabUnreadIndicator() {
+        tabUnreadTintLayer?.removeFromSuperlayer()
+        tabUnreadTintLayer = nil
+        tabUnreadDotView?.removeFromSuperview()
+        tabUnreadDotView = nil
+        hiddenShortcutLabel?.isHidden = false
+        hiddenShortcutLabel = nil
+    }
+
+    func reattachTabUnreadTintIfNeeded() {
+        guard tabHasUnread else { return }
+        if tabUnreadTintLayer?.superlayer == nil || tabUnreadDotView?.superview == nil {
+            removeTabUnreadIndicator()
+            attachTabUnreadIndicator()
+        }
+    }
+
     private var tabActiveIndicatorLayer: TabActiveIndicatorLayer?
 
     func attachTabActiveIndicator() {
@@ -753,6 +840,7 @@ class TerminalWindow: NSWindow {
             self.windowCornerRadius = 16
         }
 
+        let notificationRingColor: Color?
         init(_ config: Ghostty.Config) {
             self.title = config.title
             self.backgroundColor = NSColor(config.backgroundColor)
@@ -763,6 +851,7 @@ class TerminalWindow: NSWindow {
             self.tabActiveIndicator = config.macosTabActiveIndicator
 
             // Set corner radius based on macos-titlebar-style
+            self.notificationRingColor = nil
             // Native, transparent, and hidden styles use 16pt radius
             // Tabs style uses 20pt radius
             switch config.macosTitlebarStyle {
@@ -774,6 +863,7 @@ class TerminalWindow: NSWindow {
         }
     }
 }
+            self.notificationRingColor = config.notificationRingColor
 
 // MARK: SwiftUI View
 

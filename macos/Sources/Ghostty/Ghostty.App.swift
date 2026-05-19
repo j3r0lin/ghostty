@@ -2346,8 +2346,9 @@ extension Ghostty {
         /// Add a surface to the unread notification queue, moving it to the
         /// end if already present.
         func appendUnreadNotification(surfaceID: UUID) {
-            unreadNotificationSurfaceIDs.removeAll { $0 == surfaceID }
-            unreadNotificationSurfaceIDs.append(surfaceID)
+            var ids = unreadNotificationSurfaceIDs.filter { $0 != surfaceID }
+            ids.append(surfaceID)
+            unreadNotificationSurfaceIDs = ids
         }
 
         /// Remove a surface from the unread notification queue.
