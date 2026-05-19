@@ -19,21 +19,10 @@ extension Ghostty {
             }
         }
 
-        // The progress report (if any)
+        // The progress report (if any). Cleared only by an explicit OSC 9;4;0
+        // (remove) or when the child process exits.
         override var progressReport: Action.ProgressReport? {
-            didSet {
-                // Cancel any existing timer
-                progressReportTimer?.invalidate()
-                progressReportTimer = nil
-
-                // If we have a new progress report, start a timer to remove it after 15 seconds
-                if progressReport != nil {
-                    progressReportTimer = Timer.scheduledTimer(withTimeInterval: 15.0, repeats: false) { [weak self] _ in
-                        self?.progressReport = nil
-                        self?.progressReportTimer = nil
-                    }
-                }
-            }
+            didSet {}
         }
 
         // The currently active key sequence. The sequence is not active if this is empty.
@@ -191,9 +180,6 @@ extension Ghostty {
 
         // A timer to fallback to ghost emoji if no title is set within the grace period
         private var titleFallbackTimer: Timer?
-
-        // Timer to remove progress report after 15 seconds
-        private var progressReportTimer: Timer?
 
         // This is the title from the terminal. This is nil if we're currently using
         // the terminal title as the main title property. If the title is set manually
@@ -393,18 +379,23 @@ extension Ghostty {
                 appDelegate.ghostty.removeUnreadNotification(surfaceID: self.id)
             }
 
-            // Cancel progress report timer
-            progressReportTimer?.invalidate()
-
         }
 
         private func detectCLIAgent() {
             guard let pid = surfaceModel?.foregroundPID else {
-                if detectedAgent != nil { detectedAgent = nil }
+                if detectedAgent != nil {
+                    detectedAgent = nil
+                    progressReport = nil
+                }
                 return
             }
             let agent = CLIAgentDetector.detect(fromPID: pid)
-            if agent != detectedAgent { detectedAgent = agent }
+            if agent != detectedAgent {
+                if detectedAgent != nil && agent == nil {
+                    progressReport = nil
+                }
+                detectedAgent = agent
+            }
         }
 
         override func endSearch() {
