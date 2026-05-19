@@ -215,44 +215,57 @@ class TerminalWindow: NSWindow {
     }
 
     private var tabAgentIconView: NSImageView?
+    private var tabAgentHoverView: AgentIconHoverView?
 
     func reattachTabAgentIconIfNeeded() {
         guard tabAgent != nil else { return }
-        // If the icon view is no longer in the view hierarchy (tab bar rebuilt),
-        // re-create it.
         if tabAgentIconView?.superview == nil {
             updateTabAgentIcon()
         }
     }
+
     private func updateTabAgentIcon() {
+        tabAgentHoverView?.removeFromSuperview()
+        tabAgentHoverView = nil
         tabAgentIconView?.removeFromSuperview()
         tabAgentIconView = nil
 
         guard let agent = tabAgent else { return }
         guard let tabButton = findOwnTabButton() else { return }
-
-        // Find the title label inside the NSTabButton to position relative to it.
-        let titleLabel = tabButton.firstDescendant(withClassName: "NSTextField")
-
         guard let nsImage = NSImage(data: agent.svgData) else { return }
 
+        let iconSize: CGFloat = 12
         let iconView = NSImageView()
         iconView.image = nsImage
         iconView.imageScaling = .scaleProportionallyUpOrDown
         iconView.translatesAutoresizingMaskIntoConstraints = false
-        tabButton.addSubview(iconView)
 
-        // Position after the close button area. The tab close button is ~16px wide
-        // centered around ~10px from the leading edge, so 24px clears it.
-        let iconSize: CGFloat = 12
+        let hoverView = AgentIconHoverView(
+            iconView: iconView,
+            closeButtonFinder: { [weak tabButton] in
+                tabButton?.firstDescendant(withClassName: "NSTabCloseButton")
+            }
+        )
+        hoverView.translatesAutoresizingMaskIntoConstraints = false
+        tabButton.addSubview(hoverView)
+
         NSLayoutConstraint.activate([
-            iconView.leadingAnchor.constraint(equalTo: tabButton.leadingAnchor, constant: 24),
-            iconView.centerYAnchor.constraint(equalTo: tabButton.centerYAnchor),
+            hoverView.leadingAnchor.constraint(equalTo: tabButton.leadingAnchor),
+            hoverView.topAnchor.constraint(equalTo: tabButton.topAnchor),
+            hoverView.bottomAnchor.constraint(equalTo: tabButton.bottomAnchor),
+            hoverView.widthAnchor.constraint(equalToConstant: 28),
+        ])
+
+        hoverView.addSubview(iconView)
+        NSLayoutConstraint.activate([
+            iconView.centerXAnchor.constraint(equalTo: hoverView.centerXAnchor),
+            iconView.centerYAnchor.constraint(equalTo: hoverView.centerYAnchor),
             iconView.widthAnchor.constraint(equalToConstant: iconSize),
             iconView.heightAnchor.constraint(equalToConstant: iconSize),
         ])
 
         tabAgentIconView = iconView
+        tabAgentHoverView = hoverView
     }
 
     /// Find our own NSTabButton by walking up from our tab.accessoryView.
@@ -827,6 +840,7 @@ class TerminalWindow: NSWindow {
         let macosWindowButtons: Ghostty.MacOSWindowButtons
         let macosTitlebarStyle: Ghostty.Config.MacOSTitlebarStyle
         let tabActiveIndicator: Ghostty.Config.MacTabActiveIndicator
+        let notificationRingColor: Color?
         let windowCornerRadius: CGFloat
 
         init() {
@@ -837,10 +851,10 @@ class TerminalWindow: NSWindow {
             self.backgroundBlur = .disabled
             self.macosTitlebarStyle = .default
             self.tabActiveIndicator = .none
+            self.notificationRingColor = nil
             self.windowCornerRadius = 16
         }
 
-        let notificationRingColor: Color?
         init(_ config: Ghostty.Config) {
             self.title = config.title
             self.backgroundColor = NSColor(config.backgroundColor)
@@ -849,9 +863,9 @@ class TerminalWindow: NSWindow {
             self.backgroundBlur = config.backgroundBlur
             self.macosTitlebarStyle = config.macosTitlebarStyle
             self.tabActiveIndicator = config.macosTabActiveIndicator
+            self.notificationRingColor = config.notificationRingColor
 
             // Set corner radius based on macos-titlebar-style
-            self.notificationRingColor = nil
             // Native, transparent, and hidden styles use 16pt radius
             // Tabs style uses 20pt radius
             switch config.macosTitlebarStyle {
@@ -863,7 +877,6 @@ class TerminalWindow: NSWindow {
         }
     }
 }
-            self.notificationRingColor = config.notificationRingColor
 
 // MARK: SwiftUI View
 
@@ -1253,5 +1266,58 @@ class TabActiveIndicatorLayer: CALayer {
         l.backgroundColor = color
         l.frame = frame
         return l
+    }
+}
+
+// MARK: - Agent Icon Hover View
+
+/// Transparent overlay that sits on the close-button area of an NSTabButton.
+/// Shows the agent icon by default; on mouse hover reveals the close button instead.
+private class AgentIconHoverView: NSView {
+    private let iconView: NSImageView
+    private let closeButtonFinder: () -> NSView?
+    private var trackingArea: NSTrackingArea?
+
+    init(iconView: NSImageView, closeButtonFinder: @escaping () -> NSView?) {
+        self.iconView = iconView
+        self.closeButtonFinder = closeButtonFinder
+        super.init(frame: .zero)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let existing = trackingArea {
+            removeTrackingArea(existing)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        iconView.isHidden = true
+        closeButtonFinder()?.isHidden = false
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        iconView.isHidden = false
+        closeButtonFinder()?.isHidden = true
+    }
+
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        if superview != nil {
+            closeButtonFinder()?.isHidden = true
+        } else {
+            closeButtonFinder()?.isHidden = false
+        }
     }
 }
