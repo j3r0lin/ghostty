@@ -6,7 +6,7 @@ import AppKit
 struct TerminalRestorableTests {
     @Test
     func areYouForgettingToAddMigrationTests() {
-        #expect(TerminalRestorableState.version == 7)
+        #expect(TerminalRestorableState.version == 8)
         #expect(TerminalRestorableState.minimumVersion == 5)
 
         #expect(QuickTerminalRestorableState.version == 1)
@@ -108,6 +108,104 @@ struct TerminalRestorableTests {
         #expect(v7Generic.titleOverride == "tip")
         #expect(v7Generic.surfaceTree.contains(where: { $0.id.uuidString == "953CE952-D91D-4D36-AC72-9D0F1F6BCE73" }))
         #expect(v7Generic.surfaceTree.contains(where: { $0.id.uuidString == "D3223569-2E01-4BC5-9DB2-DBFC3AFF46D1" }))
+    }
+}
+
+// MARK: - Agent Restore Command Tests
+
+extension TerminalRestorableTests {
+    @Test
+    func deduplicateFlagsEmpty() {
+        #expect(TerminalWindowRestoration.deduplicateFlags([]) == [])
+    }
+
+    @Test
+    func deduplicateFlagsSingleElement() {
+        #expect(TerminalWindowRestoration.deduplicateFlags(["claude"]) == ["claude"])
+    }
+
+    @Test
+    func deduplicateFlagsNoFlags() {
+        #expect(TerminalWindowRestoration.deduplicateFlags(["claude", "chat"]) == ["claude", "chat"])
+    }
+
+    @Test
+    func deduplicateFlagsBooleanDuplicates() {
+        let input = ["claude", "--verbose", "--verbose", "--verbose"]
+        #expect(TerminalWindowRestoration.deduplicateFlags(input) == ["claude", "--verbose"])
+    }
+
+    @Test
+    func deduplicateFlagsFlagValueDuplicates() {
+        let input = [
+            "claude",
+            "--plugin-dir", "/path/a",
+            "--plugin-dir", "/path/a",
+            "--model", "opus",
+        ]
+        let expected = ["claude", "--plugin-dir", "/path/a", "--model", "opus"]
+        #expect(TerminalWindowRestoration.deduplicateFlags(input) == expected)
+    }
+
+    @Test
+    func deduplicateFlagsSameKeyDifferentValues() {
+        let input = ["claude", "--plugin-dir", "/path/a", "--plugin-dir", "/path/b"]
+        #expect(TerminalWindowRestoration.deduplicateFlags(input) == input)
+    }
+
+    @Test
+    func deduplicateFlagsRealisticClaude() {
+        let input = [
+            "claude",
+            "--dangerously-skip-permissions",
+            "--plugin-dir", "/Users/j/claude-personal",
+            "--dangerously-skip-permissions",
+            "--plugin-dir", "/Users/j/claude-personal",
+            "--dangerously-skip-permissions",
+            "--plugin-dir", "/Users/j/claude-personal",
+            "--model", "opus",
+        ]
+        let expected = [
+            "claude",
+            "--dangerously-skip-permissions",
+            "--plugin-dir", "/Users/j/claude-personal",
+            "--model", "opus",
+        ]
+        #expect(TerminalWindowRestoration.deduplicateFlags(input) == expected)
+    }
+
+    @Test
+    func agentRestoreCommandStripsResumeAndContinue() {
+        let argv = ["claude", "--resume", "old-id", "--continue", "--model", "opus"]
+        let result = TerminalWindowRestoration.agentRestoreCommand(argv: argv, sessionID: nil)
+        #expect(result == "claude --model opus")
+    }
+
+    @Test
+    func agentRestoreCommandInsertsNewSessionID() {
+        let argv = ["claude", "--model", "opus"]
+        let sid = "12345678-1234-1234-1234-123456789abc"
+        let result = TerminalWindowRestoration.agentRestoreCommand(argv: argv, sessionID: sid)
+        #expect(result == "claude --resume \(sid) --model opus")
+    }
+
+    @Test
+    func agentRestoreCommandRejectsNonUUIDSessionID() {
+        let argv = ["claude", "--model", "opus"]
+        let result = TerminalWindowRestoration.agentRestoreCommand(argv: argv, sessionID: "not-a-uuid")
+        #expect(result == "claude --model opus")
+    }
+
+    @Test
+    func agentRestoreCommandQuotesSpecialChars() {
+        let argv = ["claude", "--model", "claude-opus-4-6[1m]"]
+        let result = TerminalWindowRestoration.agentRestoreCommand(argv: argv, sessionID: nil)
+        #expect(result == "claude --model 'claude-opus-4-6[1m]'")
+    }
+
+    @Test
+    func agentRestoreCommandEmptyArgv() {
+        #expect(TerminalWindowRestoration.agentRestoreCommand(argv: [], sessionID: nil) == nil)
     }
 }
 

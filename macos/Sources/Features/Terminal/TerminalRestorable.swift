@@ -167,7 +167,7 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
                 ClaudeCodeSession.latestSession(forTerminalID: $0)
             }
             if let command = agentRestoreCommand(argv: agentArgv, sessionID: session?.sessionID) {
-                agentRestoreInput = command + "\n"
+                agentRestoreInput = command
             }
         }
 
@@ -219,7 +219,7 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
         c.toggleFullscreen(mode: mode)
     }
 
-    private static func agentRestoreCommand(argv: [String], sessionID: String?) -> String? {
+    static func agentRestoreCommand(argv: [String], sessionID: String?) -> String? {
         guard !argv.isEmpty else { return nil }
 
         var parts = argv
@@ -240,11 +240,49 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
             i += 1
         }
 
+        // Deduplicate flags: shell wrapper functions (e.g. the user's claude()
+        // alias) often inject the same flags on every invocation, so the
+        // captured argv can contain 3× copies of "--flag value" pairs.
+        // macOS pty canonical-mode line buffer is 1024 bytes — a long
+        // command that arrives before the shell switches to raw mode gets
+        // truncated, losing the trailing CR and preventing execution.
+        parts = deduplicateFlags(parts)
+
         if let sessionID = sessionID, UUID(uuidString: sessionID) != nil {
             parts.insert(contentsOf: ["--resume", sessionID], at: min(1, parts.count))
         }
 
         return parts.map { shellQuote($0) }.joined(separator: " ")
+    }
+
+    static func deduplicateFlags(_ parts: [String]) -> [String] {
+        guard parts.count > 1 else { return parts }
+        var result = [parts[0]]
+        var seen = Set<String>()
+        var i = 1
+        while i < parts.count {
+            let arg = parts[i]
+            if arg.hasPrefix("-") {
+                let hasValue = i + 1 < parts.count && !parts[i + 1].hasPrefix("-")
+                let key = hasValue ? arg + "\0" + parts[i + 1] : arg
+                if seen.contains(key) {
+                    i += hasValue ? 2 : 1
+                    continue
+                }
+                seen.insert(key)
+                result.append(arg)
+                if hasValue {
+                    result.append(parts[i + 1])
+                    i += 2
+                } else {
+                    i += 1
+                }
+            } else {
+                result.append(arg)
+                i += 1
+            }
+        }
+        return result
     }
 
     private static func shellQuote(_ s: String) -> String {
@@ -254,13 +292,17 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
     }
 
     private static func sendTextWhenReady(_ text: String, to view: Ghostty.SurfaceView, attempts: Int = 0) {
+        // Wait longer on the first attempt to give the shell time to finish
+        // startup scripts and switch from canonical to raw mode. In canonical
+        // mode the pty line buffer is only 1024 bytes; characters beyond that
+        // (including the trailing CR) are silently dropped by the kernel.
         let after: DispatchTime
         if attempts == 0 {
-            after = .now() + .milliseconds(200)
-        } else if attempts > 20 {
+            after = .now() + .milliseconds(500)
+        } else if attempts > 30 {
             return
         } else {
-            after = .now() + .milliseconds(100)
+            after = .now() + .milliseconds(150)
         }
 
         DispatchQueue.main.asyncAfter(deadline: after) {
@@ -268,10 +310,20 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
                 sendTextWhenReady(text, to: view, attempts: attempts + 1)
                 return
             }
-            if let pid = surface.foregroundPID, pid > 0 {
-                surface.sendText(text)
-            } else {
+            guard let pid = surface.foregroundPID, pid > 0 else {
                 sendTextWhenReady(text, to: view, attempts: attempts + 1)
+                return
+            }
+
+            // Send the command text, then press Enter via a key event.
+            // sendText goes through paste encoding: if the shell has
+            // enabled bracketed paste mode, \n would NOT be converted
+            // to \r and the command wouldn't execute. Sending Enter as a
+            // key event bypasses paste encoding entirely.
+            surface.sendText(text)
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(50)) {
+                guard view.window != nil else { return }
+                surface.sendKeyEvent(Ghostty.Input.KeyEvent(key: .enter, text: "\r"))
             }
         }
     }
