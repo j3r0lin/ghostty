@@ -433,6 +433,16 @@ extension Ghostty {
             return MacTabActiveIndicator(rawValue: String(cString: ptr)) ?? defaultValue
         }
 
+        var macosTabProgressStyle: MacTabProgressStyle {
+            let defaultValue = MacTabProgressStyle.pulse
+            guard let config = self.config else { return defaultValue }
+            var v: UnsafePointer<Int8>?
+            let key = "macos-tab-progress-style"
+            guard ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8))) else { return defaultValue }
+            guard let ptr = v else { return defaultValue }
+            return MacTabProgressStyle(rawValue: String(cString: ptr)) ?? defaultValue
+        }
+
         var macosDockDropBehavior: MacDockDropBehavior {
             let defaultValue = MacDockDropBehavior.new_tab
             guard let config = self.config else { return defaultValue }
@@ -1006,6 +1016,12 @@ extension Ghostty.Config {
     enum MacOSTitlebarStyle: String {
         static let `default` = MacOSTitlebarStyle.transparent
         case native, transparent, tabs, hidden
+    }
+
+    enum MacTabProgressStyle: String {
+        case pulse
+        case bounceTop = "bounce-top"
+        case bounceBottom = "bounce-bottom"
     }
 
     enum MacTabActiveIndicator: String {

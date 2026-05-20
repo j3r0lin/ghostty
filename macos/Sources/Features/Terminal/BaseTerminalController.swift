@@ -1284,7 +1284,7 @@ class BaseTerminalController: NSWindowController,
             for window in tabGroup.windows {
                 guard let tw = window as? TerminalWindow else { continue }
                 if tw.showTabProgress {
-                    tw.reattachTabProgressBgIfNeeded()
+                    tw.reattachTabProgressIfNeeded()
                     tw.updateTabProgressVisibility()
                 }
                 if tw.tabAgent != nil {

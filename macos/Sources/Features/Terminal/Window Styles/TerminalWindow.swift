@@ -79,10 +79,11 @@ class TerminalWindow: NSWindow {
         }
     }
 
-    private var progressBgLayer: CALayer?
+    private var progressLayers: [CALayer] = []
 
     func updateTabProgressVisibility() {
-        progressBgLayer?.isHidden = isKeyWindow
+        let hidden = isKeyWindow
+        for layer in progressLayers { layer.isHidden = hidden }
     }
 
     /// The detected CLI agent for this window's tab icon.
@@ -262,33 +263,54 @@ class TerminalWindow: NSWindow {
 
     private func updateTabProgress() {
         if showTabProgress {
-            if progressBgLayer == nil {
-                attachProgressBg()
+            if progressLayers.isEmpty {
+                attachProgressLayers()
             }
-            progressBgLayer?.isHidden = isKeyWindow
+            let hidden = isKeyWindow
+            for layer in progressLayers { layer.isHidden = hidden }
         } else {
-            progressBgLayer?.removeFromSuperlayer()
-            progressBgLayer = nil
+            removeProgressLayers()
         }
     }
 
-    func reattachTabProgressBgIfNeeded() {
+    func reattachTabProgressIfNeeded() {
         guard showTabProgress else { return }
-        if progressBgLayer?.superlayer == nil {
-            progressBgLayer = nil
-            attachProgressBg()
-            progressBgLayer?.isHidden = isKeyWindow
+        let detached = progressLayers.isEmpty || progressLayers.contains(where: { $0.superlayer == nil })
+        if detached {
+            removeProgressLayers()
+            attachProgressLayers()
+            let hidden = isKeyWindow
+            for layer in progressLayers { layer.isHidden = hidden }
         }
     }
 
-    private func attachProgressBg() {
-        guard progressBgLayer == nil, let tabButton = findOwnTabButton() else { return }
+    private func removeProgressLayers() {
+        for layer in progressLayers { layer.removeFromSuperlayer() }
+        progressLayers.removeAll()
+    }
+
+    private func attachProgressLayers() {
+        guard progressLayers.isEmpty, let tabButton = findOwnTabButton() else { return }
+        tabButton.wantsLayer = true
+        guard let parent = tabButton.layer else { return }
+        let bounds = tabButton.bounds
+
+        switch derivedConfig.tabProgressStyle {
+        case .pulse:
+            attachPulseProgress(to: parent, bounds: bounds)
+        case .bounceTop:
+            attachBounceProgress(to: parent, bounds: bounds, top: true)
+        case .bounceBottom:
+            attachBounceProgress(to: parent, bounds: bounds, top: false)
+        }
+    }
+
+    private func attachPulseProgress(to parent: CALayer, bounds: CGRect) {
         let layer = CALayer()
         layer.backgroundColor = NSColor.controlAccentColor.cgColor
-        layer.frame = tabButton.bounds
+        layer.frame = bounds
         layer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
-        tabButton.wantsLayer = true
-        tabButton.layer?.addSublayer(layer)
+        parent.addSublayer(layer)
 
         let anim = CABasicAnimation(keyPath: "opacity")
         anim.fromValue = 0.08
@@ -298,7 +320,38 @@ class TerminalWindow: NSWindow {
         anim.repeatCount = .infinity
         anim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
         layer.add(anim, forKey: "bgPulse")
-        progressBgLayer = layer
+        progressLayers.append(layer)
+    }
+
+    private func attachBounceProgress(to parent: CALayer, bounds: CGRect, top: Bool) {
+        let color = NSColor.controlAccentColor
+        let height: CGFloat = 2
+        let y: CGFloat = top ? bounds.height - height : 0
+
+        let bgLayer = CALayer()
+        bgLayer.backgroundColor = color.withAlphaComponent(0.15).cgColor
+        bgLayer.frame = CGRect(x: 0, y: y, width: bounds.width, height: height)
+        bgLayer.autoresizingMask = [.layerWidthSizable]
+        parent.addSublayer(bgLayer)
+
+        let barLayer = CALayer()
+        barLayer.backgroundColor = color.cgColor
+        barLayer.cornerRadius = 1
+        let barWidth = max(bounds.width * 0.25, 20)
+        barLayer.frame = CGRect(x: 0, y: y, width: barWidth, height: height)
+        parent.addSublayer(barLayer)
+
+        let maxX = max(bounds.width - barWidth, 0)
+        let anim = CABasicAnimation(keyPath: "position.x")
+        anim.fromValue = barWidth / 2
+        anim.toValue = maxX + barWidth / 2
+        anim.duration = 1.2
+        anim.autoreverses = true
+        anim.repeatCount = .infinity
+        anim.timingFunction = CAMediaTimingFunction(controlPoints: 0.42, 0, 0.58, 1)
+        barLayer.add(anim, forKey: "bounce")
+
+        progressLayers.append(contentsOf: [bgLayer, barLayer])
     }
 
     // MARK: NSWindow Overrides
@@ -341,6 +394,7 @@ class TerminalWindow: NSWindow {
             ] as? Ghostty.Config else { return }
 
             let oldIndicator = self.derivedConfig.tabActiveIndicator
+            let oldProgressStyle = self.derivedConfig.tabProgressStyle
             self.derivedConfig = DerivedConfig(config)
 
             // Refresh the tab active indicator if the style changed.
@@ -349,6 +403,12 @@ class TerminalWindow: NSWindow {
                 if self.isKeyWindow {
                     self.attachTabActiveIndicator()
                 }
+            }
+
+            if self.derivedConfig.tabProgressStyle != oldProgressStyle, self.showTabProgress {
+                self.removeProgressLayers()
+                self.attachProgressLayers()
+                self.updateTabProgressVisibility()
             }
         }
 
@@ -858,6 +918,7 @@ class TerminalWindow: NSWindow {
         let macosWindowButtons: Ghostty.MacOSWindowButtons
         let macosTitlebarStyle: Ghostty.Config.MacOSTitlebarStyle
         let tabActiveIndicator: Ghostty.Config.MacTabActiveIndicator
+        let tabProgressStyle: Ghostty.Config.MacTabProgressStyle
         let notificationRingColor: Color?
         let windowCornerRadius: CGFloat
 
@@ -869,6 +930,7 @@ class TerminalWindow: NSWindow {
             self.backgroundBlur = .disabled
             self.macosTitlebarStyle = .default
             self.tabActiveIndicator = .none
+            self.tabProgressStyle = .pulse
             self.notificationRingColor = nil
             self.windowCornerRadius = 16
         }
@@ -881,6 +943,7 @@ class TerminalWindow: NSWindow {
             self.backgroundBlur = config.backgroundBlur
             self.macosTitlebarStyle = config.macosTitlebarStyle
             self.tabActiveIndicator = config.macosTabActiveIndicator
+            self.tabProgressStyle = config.macosTabProgressStyle
             self.notificationRingColor = config.notificationRingColor
 
             // Set corner radius based on macos-titlebar-style

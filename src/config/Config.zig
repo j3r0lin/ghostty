@@ -3300,6 +3300,23 @@ keybind: Keybinds = .{},
 /// This is only supported on macOS.
 @"macos-tab-active-indicator": MacTabActiveIndicator = .none,
 
+/// Visual style for the indeterminate progress indicator shown on a tab
+/// when the terminal reports progress via OSC 9;4.
+///
+/// Valid values are:
+///
+///   * `pulse` - The entire tab background pulses with an accent-colored
+///     translucent overlay.
+///   * `bounce-top` - A 2px accent-colored bar bounces left and right at
+///     the top of the tab.
+///   * `bounce-bottom` - A 2px accent-colored bar bounces left and right
+///     at the bottom of the tab.
+///
+/// The default value is `pulse`.
+///
+/// This is only supported on macOS.
+@"macos-tab-progress-style": MacTabProgressStyle = .pulse,
+
 /// Controls the windowing behavior when dropping a file or folder
 /// onto the Ghostty icon in the macOS dock.
 ///
@@ -9116,6 +9133,12 @@ pub const MacTitlebarProxyIcon = enum {
 };
 
 /// See macos-tab-active-indicator
+pub const MacTabProgressStyle = enum {
+    pulse,
+    @"bounce-top",
+    @"bounce-bottom",
+};
+
 pub const MacTabActiveIndicator = enum {
     none,
     @"bottom-line",
