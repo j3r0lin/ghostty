@@ -71,26 +71,18 @@ class TerminalWindow: NSWindow {
         }
     }
 
-    /// Whether a progress indicator is shown on this window's tab.
-    /// The layer is hidden when this window is the key window (active tab),
-    /// since the content area already shows its own progress bar.
+    /// Whether the surface is reporting progress.
     var showTabProgress: Bool = false {
         didSet {
             guard showTabProgress != oldValue else { return }
-            if showTabProgress {
-                attachTabProgressLayer()
-                tabProgressLayer?.isHidden = isKeyWindow
-            } else {
-                tabProgressLayer?.removeFromSuperlayer()
-                tabProgressLayer = nil
-            }
+            updateTabProgress()
         }
     }
 
-    private(set) var tabProgressLayer: TabProgressBarLayer?
+    private var progressBgLayer: CALayer?
 
     func updateTabProgressVisibility() {
-        tabProgressLayer?.isHidden = isKeyWindow
+        progressBgLayer?.isHidden = isKeyWindow
     }
 
     /// The detected CLI agent for this window's tab icon.
@@ -268,19 +260,45 @@ class TerminalWindow: NSWindow {
         tabAgentHoverView = hoverView
     }
 
-    /// Find our own NSTabButton by walking up from our tab.accessoryView.
-    func attachTabProgressLayer() {
-        guard tabProgressLayer == nil else { return }
-        guard let tabButton = findOwnTabButton() else { return }
+    private func updateTabProgress() {
+        if showTabProgress {
+            if progressBgLayer == nil {
+                attachProgressBg()
+            }
+            progressBgLayer?.isHidden = isKeyWindow
+        } else {
+            progressBgLayer?.removeFromSuperlayer()
+            progressBgLayer = nil
+        }
+    }
 
-        let layer = TabProgressBarLayer()
-        let height: CGFloat = 2
-        layer.frame = CGRect(x: 0, y: 0, width: tabButton.bounds.width, height: height)
-        layer.autoresizingMask = [.layerWidthSizable]
+    func reattachTabProgressBgIfNeeded() {
+        guard showTabProgress else { return }
+        if progressBgLayer?.superlayer == nil {
+            progressBgLayer = nil
+            attachProgressBg()
+            progressBgLayer?.isHidden = isKeyWindow
+        }
+    }
+
+    private func attachProgressBg() {
+        guard progressBgLayer == nil, let tabButton = findOwnTabButton() else { return }
+        let layer = CALayer()
+        layer.backgroundColor = NSColor.controlAccentColor.cgColor
+        layer.frame = tabButton.bounds
+        layer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
         tabButton.wantsLayer = true
         tabButton.layer?.addSublayer(layer)
-        layer.startBouncing()
-        tabProgressLayer = layer
+
+        let anim = CABasicAnimation(keyPath: "opacity")
+        anim.fromValue = 0.08
+        anim.toValue = 0.35
+        anim.duration = 0.9
+        anim.autoreverses = true
+        anim.repeatCount = .infinity
+        anim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        layer.add(anim, forKey: "bgPulse")
+        progressBgLayer = layer
     }
 
     // MARK: NSWindow Overrides
@@ -1102,63 +1120,6 @@ extension TerminalWindow: TabTitleEditorDelegate {
     }
 }
 
-// MARK: - Tab Progress Bar
-
-/// A Core Animation layer that renders a bouncing indeterminate progress bar.
-class TabProgressBarLayer: CALayer {
-    private let barLayer = CALayer()
-    private let bgLayer = CALayer()
-    private var lastKnownWidth: CGFloat = 0
-
-    override init() {
-        super.init()
-        setup()
-    }
-
-    override init(layer: Any) {
-        super.init(layer: layer)
-    }
-
-    required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        setup()
-    }
-
-    private func setup() {
-        let color = NSColor.controlAccentColor
-        bgLayer.backgroundColor = color.withAlphaComponent(0.15).cgColor
-        addSublayer(bgLayer)
-        barLayer.backgroundColor = color.cgColor
-        barLayer.cornerRadius = 1
-        addSublayer(barLayer)
-    }
-
-    override func layoutSublayers() {
-        super.layoutSublayers()
-        bgLayer.frame = bounds
-        if bounds.width != lastKnownWidth {
-            lastKnownWidth = bounds.width
-            startBouncing()
-        }
-    }
-
-    func startBouncing() {
-        barLayer.removeAllAnimations()
-        let barWidth = max(bounds.width * 0.25, 20)
-        let maxX = max(bounds.width - barWidth, 0)
-        barLayer.frame = CGRect(x: 0, y: 0, width: barWidth, height: bounds.height)
-
-        let anim = CABasicAnimation(keyPath: "position.x")
-        anim.fromValue = barWidth / 2
-        anim.toValue = maxX + barWidth / 2
-        anim.duration = 1.2
-        anim.autoreverses = true
-        anim.repeatCount = .infinity
-        anim.timingFunction = CAMediaTimingFunction(controlPoints: 0.42, 0, 0.58, 1)
-        barLayer.add(anim, forKey: "bounce")
-    }
-}
-
 // MARK: - Tab Active Indicator
 
 class TabActiveIndicatorLayer: CALayer {
@@ -1274,11 +1235,11 @@ class TabActiveIndicatorLayer: CALayer {
 /// Transparent overlay that sits on the close-button area of an NSTabButton.
 /// Shows the agent icon by default; on mouse hover reveals the close button instead.
 private class AgentIconHoverView: NSView {
-    private let iconView: NSImageView
+    private let iconView: NSView
     private let closeButtonFinder: () -> NSView?
     private var trackingArea: NSTrackingArea?
 
-    init(iconView: NSImageView, closeButtonFinder: @escaping () -> NSView?) {
+    init(iconView: NSView, closeButtonFinder: @escaping () -> NSView?) {
         self.iconView = iconView
         self.closeButtonFinder = closeButtonFinder
         super.init(frame: .zero)
