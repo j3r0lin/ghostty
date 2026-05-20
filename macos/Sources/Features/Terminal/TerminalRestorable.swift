@@ -249,7 +249,7 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
         parts = deduplicateFlags(parts)
 
         if let sessionID = sessionID, UUID(uuidString: sessionID) != nil {
-            parts.insert(contentsOf: ["--resume", sessionID], at: min(1, parts.count))
+            parts.append(contentsOf: ["--resume", sessionID])
         }
 
         return parts.map { shellQuote($0) }.joined(separator: " ")

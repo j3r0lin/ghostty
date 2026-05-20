@@ -186,7 +186,7 @@ extension TerminalRestorableTests {
         let argv = ["claude", "--model", "opus"]
         let sid = "12345678-1234-1234-1234-123456789abc"
         let result = TerminalWindowRestoration.agentRestoreCommand(argv: argv, sessionID: sid)
-        #expect(result == "claude --resume \(sid) --model opus")
+        #expect(result == "claude --model opus --resume \(sid)")
     }
 
     @Test
