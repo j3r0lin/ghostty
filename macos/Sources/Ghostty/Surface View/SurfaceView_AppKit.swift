@@ -1075,6 +1075,10 @@ extension Ghostty {
         }
 
         override func keyDown(with event: NSEvent) {
+            // Track user-originated input so restoration paths can detect
+            // races with typing and abort cleanly.
+            userInputCount &+= 1
+
             guard let surface = self.surface else {
                 self.interpretKeyEvents([event])
                 return

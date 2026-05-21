@@ -287,7 +287,12 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
         return safe ? s : "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
-    private static func sendTextWhenReady(_ text: String, to view: Ghostty.SurfaceView, attempts: Int = 0) {
+    private static func sendTextWhenReady(
+        _ text: String,
+        to view: Ghostty.SurfaceView,
+        attempts: Int = 0,
+        baselineInputCount: Int? = nil
+    ) {
         // Wait longer on the first attempt to give the shell time to finish
         // startup scripts and switch from canonical to raw mode. In canonical
         // mode the pty line buffer is only 1024 bytes; characters beyond that
@@ -301,13 +306,20 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
             after = .now() + .milliseconds(150)
         }
 
+        // Capture the input baseline on the very first scheduling so we can
+        // detect if the user typed during the polling window.
+        let baseline = baselineInputCount ?? view.userInputCount
+
         DispatchQueue.main.asyncAfter(deadline: after) {
+            // If the user typed during the wait, abandon restoration rather
+            // than splicing the agent command into their input stream.
+            guard view.userInputCount == baseline else { return }
             guard let surface = view.surfaceModel, view.window != nil else {
-                sendTextWhenReady(text, to: view, attempts: attempts + 1)
+                sendTextWhenReady(text, to: view, attempts: attempts + 1, baselineInputCount: baseline)
                 return
             }
             guard let pid = surface.foregroundPID, pid > 0 else {
-                sendTextWhenReady(text, to: view, attempts: attempts + 1)
+                sendTextWhenReady(text, to: view, attempts: attempts + 1, baselineInputCount: baseline)
                 return
             }
 
@@ -319,6 +331,9 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
             surface.sendText(text)
             DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(50)) {
                 guard view.window != nil else { return }
+                // Even mid-injection: if the user managed to slip a key in
+                // between text and enter, don't press enter on a polluted line.
+                guard view.userInputCount == baseline else { return }
                 surface.sendKeyEvent(Ghostty.Input.KeyEvent(key: .enter, text: "\r"))
             }
         }
