@@ -223,22 +223,40 @@ enum CLIAgentDetector {
         guard sysctl(&mib, 3, buffer, &size, nil, 0) == 0 else { return nil }
         buffer.storeBytes(of: UInt8(0), toByteOffset: size, as: UInt8.self)
 
-        let argc = buffer.load(as: Int32.self)
+        // argc from the kernel is unsigned in spirit; clamp aggressively so a
+        // garbage value can't trap the `0..<argc` range or run away.
+        let rawArgc = Int(buffer.load(as: Int32.self))
+        let argc = max(0, min(rawArgc, 4096))
+
+        // Scan raw bytes for the terminating NUL — String(cString:) does
+        // UTF-8 replacement, so `String.utf8.count` does not equal the
+        // original byte length when argv contains non-UTF-8 bytes.
+        func endOfCString(from start: Int) -> Int {
+            var p = start
+            while p < size && buffer.load(fromByteOffset: p, as: UInt8.self) != 0 {
+                p += 1
+            }
+            return p
+        }
+
         var offset = MemoryLayout<Int32>.size
-
+        let execEnd = endOfCString(from: offset)
         let execPath = String(cString: buffer.advanced(by: offset).assumingMemoryBound(to: CChar.self))
-        offset += execPath.utf8.count + 1
+        offset = execEnd + 1  // skip the NUL
 
+        // Skip alignment padding between exec_path and argv[0].
         while offset < size && buffer.load(fromByteOffset: offset, as: UInt8.self) == 0 {
             offset += 1
         }
 
         var argv: [String] = []
+        argv.reserveCapacity(argc)
         for _ in 0..<argc {
             guard offset < size else { break }
+            let argEnd = endOfCString(from: offset)
             let arg = String(cString: buffer.advanced(by: offset).assumingMemoryBound(to: CChar.self))
             argv.append(arg)
-            offset += arg.utf8.count + 1
+            offset = argEnd + 1
         }
 
         guard !argv.isEmpty else { return nil }
@@ -293,26 +311,42 @@ enum CLIAgentDetector {
     }
 
     private static func childPIDs(of parentPID: Int32) -> [Int32] {
-        // Get all PIDs on the system, then filter by ppid.
-        var count = proc_listpids(UInt32(PROC_ALL_PIDS), 0, nil, 0)
-        guard count > 0 else { return [] }
-        var pids = [Int32](repeating: 0, count: Int(count) / MemoryLayout<Int32>.size + 16)
-        count = pids.withUnsafeMutableBufferPointer { buf in
-            proc_listpids(UInt32(PROC_ALL_PIDS), 0, buf.baseAddress, Int32(buf.count * MemoryLayout<Int32>.size))
-        }
-        let pidCount = Int(count) / MemoryLayout<Int32>.size
+        // Snapshot all PIDs and filter by ppid. Sizing is racy: between the
+        // probe call and the read call new processes can appear. We retry
+        // with a doubled buffer until proc_listpids fits comfortably (returns
+        // strictly less than the buffer size) or we hit a hard cap.
+        let stride = MemoryLayout<Int32>.size
+        let allPids = UInt32(PROC_ALL_PIDS)
+        var slots = max(Int(proc_listpids(allPids, 0, nil, 0)) / stride, 256) * 2
+        let cap = 1 << 20  // 1M PIDs — beyond any reasonable system
 
-        var children: [Int32] = []
-        for i in 0..<pidCount {
-            let pid = pids[i]
-            guard pid > 0 else { continue }
-            var info = proc_bsdinfo()
-            let size = Int32(MemoryLayout<proc_bsdinfo>.size)
-            let ret = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size)
-            if ret > 0 && Int32(info.pbi_ppid) == parentPID {
-                children.append(pid)
+        while slots <= cap {
+            var pids = [Int32](repeating: 0, count: slots)
+            let writtenBytes = Int(pids.withUnsafeMutableBufferPointer { buf in
+                proc_listpids(allPids, 0, buf.baseAddress, Int32(buf.count * stride))
+            })
+            guard writtenBytes > 0 else { return [] }
+            let pidCount = writtenBytes / stride
+
+            // Kernel signals "buffer too small" by filling it completely.
+            if pidCount == slots {
+                slots *= 2
+                continue
             }
+
+            var children: [Int32] = []
+            for i in 0..<pidCount {
+                let pid = pids[i]
+                guard pid > 0 else { continue }
+                var info = proc_bsdinfo()
+                let infoSize = Int32(MemoryLayout<proc_bsdinfo>.size)
+                let ret = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, infoSize)
+                if ret > 0 && Int32(info.pbi_ppid) == parentPID {
+                    children.append(pid)
+                }
+            }
+            return children
         }
-        return children
+        return []
     }
 }
