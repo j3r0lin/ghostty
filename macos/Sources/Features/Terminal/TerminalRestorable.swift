@@ -222,18 +222,23 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
     static func agentRestoreCommand(argv: [String], sessionID: String?) -> String? {
         guard !argv.isEmpty else { return nil }
 
+        // Flags that take a value (so we also need to drop the next token).
+        let stripWithValue: Set<String> = ["--resume", "-r", "--session-id"]
+        // Boolean flags (no following value).
+        let stripBoolean: Set<String> = ["--continue", "-c"]
+
         var parts = argv
         var i = 0
         while i < parts.count {
             let flag = parts[i]
-            if flag == "--resume" || flag == "--session-id" {
+            if stripWithValue.contains(flag) {
                 parts.remove(at: i)
                 if i < parts.count && !parts[i].hasPrefix("-") {
                     parts.remove(at: i)
                 }
                 continue
             }
-            if flag == "--continue" {
+            if stripBoolean.contains(flag) {
                 parts.remove(at: i)
                 continue
             }

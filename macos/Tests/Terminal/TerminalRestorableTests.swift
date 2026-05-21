@@ -182,6 +182,21 @@ extension TerminalRestorableTests {
     }
 
     @Test
+    func agentRestoreCommandStripsShortResumeAndContinue() {
+        let argv = ["claude", "-r", "old-id", "-c", "--model", "opus"]
+        let result = TerminalWindowRestoration.agentRestoreCommand(argv: argv, sessionID: nil)
+        #expect(result == "claude --model opus")
+    }
+
+    @Test
+    func agentRestoreCommandStripsShortFlagsAndAppendsNewSession() {
+        let argv = ["claude", "-r", "old-id", "--model", "opus"]
+        let sid = "12345678-1234-1234-1234-123456789abc"
+        let result = TerminalWindowRestoration.agentRestoreCommand(argv: argv, sessionID: sid)
+        #expect(result == "claude --model opus --resume \(sid)")
+    }
+
+    @Test
     func agentRestoreCommandInsertsNewSessionID() {
         let argv = ["claude", "--model", "opus"]
         let sid = "12345678-1234-1234-1234-123456789abc"
