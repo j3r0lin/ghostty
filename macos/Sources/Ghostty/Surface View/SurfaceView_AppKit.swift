@@ -186,6 +186,11 @@ extension Ghostty {
         // by the user, this is set to the prior value (which may be empty, but non-nil).
         private var titleFromTerminal: String?
 
+        // The agent argv captured at the time the previous Ghostty session was saved.
+        // Populated only on decode and consumed by TerminalWindowRestoration; nil once
+        // the surface has been live for any length of time.
+        var savedAgentArgv: [String]?
+
         // The cached contents of the screen.
         private(set) var cachedScreenContents: CachedValue<String>
         private(set) var cachedVisibleContents: CachedValue<String>
@@ -1833,6 +1838,7 @@ extension Ghostty {
             case uuid
             case title
             case isUserSetTitle
+            case agentArgv
         }
 
         required convenience init(from decoder: Decoder) throws {
@@ -1849,6 +1855,7 @@ extension Ghostty {
             config.workingDirectory = try container.decode(String?.self, forKey: .pwd)
             let savedTitle = try container.decodeIfPresent(String.self, forKey: .title)
             let isUserSetTitle = try container.decodeIfPresent(Bool.self, forKey: .isUserSetTitle) ?? false
+            let argv = try container.decodeIfPresent([String].self, forKey: .agentArgv)
 
             self.init(app, baseConfig: config, uuid: uuid)
 
@@ -1860,6 +1867,8 @@ extension Ghostty {
                     self.titleFromTerminal = title
                 }
             }
+
+            self.savedAgentArgv = argv
         }
 
         func encode(to encoder: Encoder) throws {
@@ -1868,6 +1877,7 @@ extension Ghostty {
             try container.encode(id.uuidString, forKey: .uuid)
             try container.encode(title, forKey: .title)
             try container.encode(titleFromTerminal != nil, forKey: .isUserSetTitle)
+            try container.encodeIfPresent(detectedAgentSession?.argv, forKey: .agentArgv)
         }
     }
 }

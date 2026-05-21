@@ -16,41 +16,30 @@ extension TerminalRestorableState {
         let tabColor: TerminalTabColor?
         let titleOverride: String?
 
-        // MARK: - Version 8
-        let agentArgv: [String]?
-        let agentTerminalID: String?
-
         init(
             focusedSurface: String?,
             surfaceTree: SplitTree<ViewType>,
             effectiveFullscreenMode: FullscreenMode?,
             tabColor: TerminalTabColor?,
             titleOverride: String?,
-            agentArgv: [String]? = nil,
-            agentTerminalID: String? = nil,
         ) {
             self.focusedSurface = focusedSurface
             self.surfaceTree = surfaceTree
             self.effectiveFullscreenMode = effectiveFullscreenMode
             self.tabColor = tabColor
             self.titleOverride = titleOverride
-            self.agentArgv = agentArgv
-            self.agentTerminalID = agentTerminalID
         }
     }
 }
 
 extension TerminalRestorableState.InternalState where ViewType == Ghostty.SurfaceView {
     init(from controller: TerminalController) {
-        let agentSession = controller.focusedSurface?.detectedAgentSession
         self.init(
             focusedSurface: controller.focusedSurface?.id.uuidString,
             surfaceTree: controller.surfaceTree,
             effectiveFullscreenMode: controller.fullscreenStyle?.fullscreenMode,
             tabColor: (controller.window as? TerminalWindow)?.tabColor,
             titleOverride: controller.titleOverride,
-            agentArgv: agentSession?.argv,
-            agentTerminalID: agentSession != nil ? controller.focusedSurface?.id.uuidString : nil,
         )
     }
 }

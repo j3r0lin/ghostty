@@ -76,12 +76,6 @@ final class TerminalRestorableState: TerminalRestorable {
     var titleOverride: String? {
         internalState.titleOverride
     }
-    var agentArgv: [String]? {
-        internalState.agentArgv
-    }
-    var agentTerminalID: String? {
-        internalState.agentTerminalID
-    }
 
     /// Internal State we use to perform unit tests
     ///
@@ -157,20 +151,6 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
             return
         }
 
-        // Build agent restore command to inject into the shell after restoration.
-        // We restore the normal surface tree (shell) and send the command as
-        // initial input, so the shell has full PATH/profile and stays alive
-        // even if the command fails.
-        var agentRestoreInput: String?
-        if let agentArgv = state.agentArgv, !agentArgv.isEmpty {
-            let session = state.agentTerminalID.flatMap {
-                ClaudeCodeSession.latestSession(forTerminalID: $0)
-            }
-            if let command = agentRestoreCommand(argv: agentArgv, sessionID: session?.sessionID) {
-                agentRestoreInput = command
-            }
-        }
-
         // The window creation has to go through our terminalManager so that it
         // can be found for events from libghostty. This uses the low-level
         // createWindow so that AppKit can place the window wherever it should
@@ -205,8 +185,19 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
             }
         }
 
-        if let input = agentRestoreInput, let surfaceView = c.focusedSurface {
-            sendTextWhenReady(input, to: surfaceView)
+        // Re-inject the agent command into every surface that had one running.
+        // Each surface restores in its own pwd, so the resume command runs in
+        // the correct cwd; only running sessions are eligible so an exited
+        // agent isn't resurrected.
+        for view in c.surfaceTree {
+            guard let argv = view.savedAgentArgv, !argv.isEmpty else { continue }
+            view.savedAgentArgv = nil
+            let session = ClaudeCodeSession.latestSession(
+                forTerminalID: view.id.uuidString,
+                requiringStatus: "running")
+            if let command = agentRestoreCommand(argv: argv, sessionID: session?.sessionID) {
+                sendTextWhenReady(command, to: view)
+            }
         }
 
         completionHandler(window, nil)
