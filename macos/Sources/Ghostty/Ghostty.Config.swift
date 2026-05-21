@@ -443,6 +443,14 @@ extension Ghostty {
             return MacTabProgressStyle(rawValue: String(cString: ptr)) ?? defaultValue
         }
 
+        var macosTabProgressWidth: CGFloat {
+            guard let config = self.config else { return 2 }
+            var v: UInt8 = 2
+            let key = "macos-tab-progress-width"
+            _ = ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8)))
+            return CGFloat(v)
+        }
+
         var macosDockDropBehavior: MacDockDropBehavior {
             let defaultValue = MacDockDropBehavior.new_tab
             guard let config = self.config else { return defaultValue }
@@ -1020,6 +1028,9 @@ extension Ghostty.Config {
 
     enum MacTabProgressStyle: String {
         case pulse
+        case pulseTop = "pulse-top"
+        case pulseAll = "pulse-all"
+        case pulseDot = "pulse-dot"
         case bounceTop = "bounce-top"
         case bounceBottom = "bounce-bottom"
     }

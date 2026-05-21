@@ -80,6 +80,7 @@ class TerminalWindow: NSWindow {
     }
 
     private var progressLayers: [CALayer] = []
+    private weak var progressHiddenShortcutLabel: NSView?
 
     func updateTabProgressVisibility() {
         let hidden = isKeyWindow
@@ -287,6 +288,8 @@ class TerminalWindow: NSWindow {
     private func removeProgressLayers() {
         for layer in progressLayers { layer.removeFromSuperlayer() }
         progressLayers.removeAll()
+        progressHiddenShortcutLabel?.isHidden = false
+        progressHiddenShortcutLabel = nil
     }
 
     private func attachProgressLayers() {
@@ -298,6 +301,14 @@ class TerminalWindow: NSWindow {
         switch derivedConfig.tabProgressStyle {
         case .pulse:
             attachPulseProgress(to: parent, bounds: bounds)
+        case .pulseTop:
+            attachPulseLineProgress(to: parent, bounds: bounds)
+        case .pulseAll:
+            attachPulseProgress(to: parent, bounds: bounds)
+            attachPulseLineProgress(to: parent, bounds: bounds)
+        case .pulseDot:
+            attachPulseProgress(to: parent, bounds: bounds)
+            attachPulseDot(to: parent, bounds: bounds)
         case .bounceTop:
             attachBounceProgress(to: parent, bounds: bounds, top: true)
         case .bounceBottom:
@@ -314,7 +325,7 @@ class TerminalWindow: NSWindow {
 
         let anim = CABasicAnimation(keyPath: "opacity")
         anim.fromValue = 0.08
-        anim.toValue = 0.35
+        anim.toValue = 0.5
         anim.duration = 0.9
         anim.autoreverses = true
         anim.repeatCount = .infinity
@@ -323,9 +334,63 @@ class TerminalWindow: NSWindow {
         progressLayers.append(layer)
     }
 
+    private func attachPulseLineProgress(to parent: CALayer, bounds: CGRect) {
+        let height = derivedConfig.tabProgressWidth
+        let y = bounds.height - height
+
+        let layer = CALayer()
+        layer.backgroundColor = NSColor.controlAccentColor.cgColor
+        layer.frame = CGRect(x: 0, y: y, width: bounds.width, height: height)
+        layer.autoresizingMask = [.layerWidthSizable]
+        parent.addSublayer(layer)
+
+        let anim = CABasicAnimation(keyPath: "opacity")
+        anim.fromValue = 0.3
+        anim.toValue = 1.0
+        anim.duration = 0.9
+        anim.autoreverses = true
+        anim.repeatCount = .infinity
+        anim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        layer.add(anim, forKey: "linePulse")
+
+        progressLayers.append(layer)
+    }
+
+    private func attachPulseDot(to parent: CALayer, bounds: CGRect) {
+        if let tabButton = findOwnTabButton(),
+           let shortcutLabel = findShortcutLabel(in: tabButton) {
+            shortcutLabel.isHidden = true
+            progressHiddenShortcutLabel = shortcutLabel
+        }
+
+        let color = NSColor.controlAccentColor
+        let dotSize: CGFloat = 7
+        let dot = CALayer()
+        dot.backgroundColor = color.cgColor
+        dot.cornerRadius = dotSize / 2
+        dot.frame = CGRect(
+            x: bounds.width - 10 - dotSize,
+            y: (bounds.height - dotSize) / 2,
+            width: dotSize,
+            height: dotSize
+        )
+        parent.addSublayer(dot)
+
+        let anim = CABasicAnimation(keyPath: "opacity")
+        anim.fromValue = 0.4
+        anim.toValue = 1.0
+        anim.duration = 0.9
+        anim.autoreverses = true
+        anim.repeatCount = .infinity
+        anim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        dot.add(anim, forKey: "dotPulse")
+
+        progressLayers.append(dot)
+    }
+
     private func attachBounceProgress(to parent: CALayer, bounds: CGRect, top: Bool) {
         let color = NSColor.controlAccentColor
-        let height: CGFloat = 2
+        let height = derivedConfig.tabProgressWidth
         let y: CGFloat = top ? bounds.height - height : 0
 
         let bgLayer = CALayer()
@@ -919,6 +984,7 @@ class TerminalWindow: NSWindow {
         let macosTitlebarStyle: Ghostty.Config.MacOSTitlebarStyle
         let tabActiveIndicator: Ghostty.Config.MacTabActiveIndicator
         let tabProgressStyle: Ghostty.Config.MacTabProgressStyle
+        let tabProgressWidth: CGFloat
         let notificationRingColor: Color?
         let windowCornerRadius: CGFloat
 
@@ -931,6 +997,7 @@ class TerminalWindow: NSWindow {
             self.macosTitlebarStyle = .default
             self.tabActiveIndicator = .none
             self.tabProgressStyle = .pulse
+            self.tabProgressWidth = 2
             self.notificationRingColor = nil
             self.windowCornerRadius = 16
         }
@@ -944,6 +1011,7 @@ class TerminalWindow: NSWindow {
             self.macosTitlebarStyle = config.macosTitlebarStyle
             self.tabActiveIndicator = config.macosTabActiveIndicator
             self.tabProgressStyle = config.macosTabProgressStyle
+            self.tabProgressWidth = config.macosTabProgressWidth
             self.notificationRingColor = config.notificationRingColor
 
             // Set corner radius based on macos-titlebar-style

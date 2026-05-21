@@ -3307,15 +3307,30 @@ keybind: Keybinds = .{},
 ///
 ///   * `pulse` - The entire tab background pulses with an accent-colored
 ///     translucent overlay.
-///   * `bounce-top` - A 2px accent-colored bar bounces left and right at
-///     the top of the tab.
-///   * `bounce-bottom` - A 2px accent-colored bar bounces left and right
-///     at the bottom of the tab.
+///   * `pulse-top` - An accent-colored bar spans the top of the tab and
+///     pulses its opacity. Bar height is set by `macos-tab-progress-width`.
+///   * `pulse-all` - Combines `pulse` and `pulse-top`: the tab background
+///     pulses while a bar at the top pulses independently.
+///   * `pulse-dot` - The tab background pulses (like `pulse`) while a
+///     trailing dot pulses, resembling the unread notification indicator.
+///   * `bounce-top` - An accent-colored bar bounces left and right at the
+///     top of the tab. Bar height is set by `macos-tab-progress-width`.
+///   * `bounce-bottom` - An accent-colored bar bounces left and right at
+///     the bottom of the tab. Bar height is set by `macos-tab-progress-width`.
 ///
 /// The default value is `pulse`.
 ///
 /// This is only supported on macOS.
 @"macos-tab-progress-style": MacTabProgressStyle = .pulse,
+
+/// The line width in points for line-based tab progress styles
+/// (`pulse-top`, `pulse-all`, `bounce-top`, `bounce-bottom`).
+/// Has no effect on the `pulse` style.
+///
+/// The default value is `2`.
+///
+/// This is only supported on macOS.
+@"macos-tab-progress-width": u8 = 2,
 
 /// Controls the windowing behavior when dropping a file or folder
 /// onto the Ghostty icon in the macOS dock.
@@ -9135,6 +9150,9 @@ pub const MacTitlebarProxyIcon = enum {
 /// See macos-tab-active-indicator
 pub const MacTabProgressStyle = enum {
     pulse,
+    @"pulse-top",
+    @"pulse-all",
+    @"pulse-dot",
     @"bounce-top",
     @"bounce-bottom",
 };
