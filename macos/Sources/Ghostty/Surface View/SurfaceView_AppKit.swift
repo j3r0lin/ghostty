@@ -1727,13 +1727,12 @@ extension Ghostty {
         ///     the agent's brand icon on the left.
         ///   - Else (user is in another app) show a system notification so it
         ///     reaches them through the OS notification UI.
-        func showUserNotification(title: String, body: String, agentState: String? = nil, requireFocus: Bool = true) {
+        func showUserNotification(title: String, body: String, requireFocus: Bool = true) {
             let ghosttyActive = NSApp.isActive
             let surfaceVisible =
                 self.focused && (self.window?.isKeyWindow ?? false) && ghosttyActive
 
-            // Only show notification ring for agent "waiting" state.
-            if agentState == "waiting" && !surfaceVisible {
+            if !surfaceVisible {
                 if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
                     appDelegate.ghostty.appendUnreadNotification(surfaceID: self.id)
                 }

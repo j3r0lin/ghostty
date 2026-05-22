@@ -1407,12 +1407,10 @@ extension Ghostty {
                 guard let surfaceView = self.surfaceView(from: surface) else { return }
                 guard let title = String(cString: n.title!, encoding: .utf8) else { return }
                 guard let body = String(cString: n.body!, encoding: .utf8) else { return }
-                let agent = String(cString: n.agent!, encoding: .utf8).flatMap { $0.isEmpty ? nil : $0 }
-                let state = String(cString: n.state!, encoding: .utf8).flatMap { $0.isEmpty ? nil : $0 }
                 let resolvedTitle = title == ClaudeCodeSession.defaultTitle
                     ? (ClaudeCodeSession.cachedTitle(forTerminalID: surfaceView.id.uuidString) ?? title)
                     : title
-                showDesktopNotification(surfaceView, title: resolvedTitle, body: body, agent: agent, state: state)
+                showDesktopNotification(surfaceView, title: resolvedTitle, body: body)
 
             default:
                 assertionFailure()
@@ -1423,8 +1421,6 @@ extension Ghostty {
             _ surfaceView: SurfaceView,
             title: String,
             body: String,
-            agent: String? = nil,
-            state: String? = nil,
             requireFocus: Bool = true) {
             let center = UNUserNotificationCenter.current()
             center.requestAuthorization(options: [.alert, .sound]) { _, error in
@@ -1439,7 +1435,6 @@ extension Ghostty {
                     surfaceView.showUserNotification(
                         title: title,
                         body: body,
-                        agentState: state,
                         requireFocus: requireFocus
                     )
                 }
