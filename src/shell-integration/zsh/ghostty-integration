@@ -445,6 +445,34 @@ _ghostty_deferred_init() {
         precmd_functions=(${precmd_functions:#_ghostty_deferred_init})
     fi
 
+    # Restore a CLI agent session if a restore file was left by
+    # TerminalWindowRestoration. The file contains a shell command
+    # (e.g. "claude --resume <id>") written during window restore.
+    # We inject it into ZLE's first line-init so it executes after
+    # all startup scripts have finished — no pty injection races.
+    if [[ -n "$ITERM_SESSION_ID" ]]; then
+        builtin local _restore_id="${ITERM_SESSION_ID#ghostty:}"
+        builtin local _restore_file="$HOME/.claude/ghostty/${_restore_id}.restore"
+        if [[ -r "$_restore_file" ]]; then
+            builtin typeset -g _ghostty_restore_cmd
+            _ghostty_restore_cmd="$(<"$_restore_file")"
+            command rm -f "$_restore_file"
+            _ghostty_restore_agent() {
+                BUFFER="$_ghostty_restore_cmd"
+                builtin unset _ghostty_restore_cmd
+                builtin unfunction _ghostty_restore_agent
+                builtin zle accept-line
+            }
+            (( $+functions[_ghostty_zle_line_init] )) && \
+            functions[_ghostty_zle_line_init]="
+                if (( \$+functions[_ghostty_restore_agent] )); then
+                    _ghostty_restore_agent
+                    return
+                fi
+            ${functions[_ghostty_zle_line_init]}"
+        fi
+    fi
+
     # Unfunction _ghostty_deferred_init to save memory. Don't unfunction
     # ghostty-integration though because decent public functions aren't supposed to
     # to unfunction themselves when invoked. Unfunctioning is done by calling code.

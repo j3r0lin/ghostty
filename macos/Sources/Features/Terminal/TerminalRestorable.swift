@@ -185,10 +185,10 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
             }
         }
 
-        // Re-inject the agent command into every surface that had one running.
-        // Each surface restores in its own pwd, so the resume command runs in
-        // the correct cwd; only running sessions are eligible so an exited
-        // agent isn't resurrected.
+        // Write restore commands for surfaces that had an agent running.
+        // The shell integration hook picks these up after initialization
+        // completes, avoiding races with interactive prompts (e.g. oh-my-zsh
+        // update checks) that would consume characters from pty injection.
         for view in c.surfaceTree {
             guard let argv = view.savedAgentArgv, !argv.isEmpty else { continue }
             view.savedAgentArgv = nil
@@ -196,7 +196,7 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
                 forTerminalID: view.id.uuidString,
                 requiringStatus: "running")
             if let command = agentRestoreCommand(argv: argv, sessionID: session?.sessionID) {
-                sendTextWhenReady(command, to: view)
+                writeRestoreFile(command, forSurfaceID: view.id)
             }
         }
 
@@ -287,56 +287,11 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
         return safe ? s : "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
-    private static func sendTextWhenReady(
-        _ text: String,
-        to view: Ghostty.SurfaceView,
-        attempts: Int = 0,
-        baselineInputCount: Int? = nil
-    ) {
-        // Wait longer on the first attempt to give the shell time to finish
-        // startup scripts and switch from canonical to raw mode. In canonical
-        // mode the pty line buffer is only 1024 bytes; characters beyond that
-        // (including the trailing CR) are silently dropped by the kernel.
-        let after: DispatchTime
-        if attempts == 0 {
-            after = .now() + .milliseconds(500)
-        } else if attempts > 30 {
-            return
-        } else {
-            after = .now() + .milliseconds(150)
-        }
-
-        // Capture the input baseline on the very first scheduling so we can
-        // detect if the user typed during the polling window.
-        let baseline = baselineInputCount ?? view.userInputCount
-
-        DispatchQueue.main.asyncAfter(deadline: after) {
-            // If the user typed during the wait, abandon restoration rather
-            // than splicing the agent command into their input stream.
-            guard view.userInputCount == baseline else { return }
-            guard let surface = view.surfaceModel, view.window != nil else {
-                sendTextWhenReady(text, to: view, attempts: attempts + 1, baselineInputCount: baseline)
-                return
-            }
-            guard let pid = surface.foregroundPID, pid > 0 else {
-                sendTextWhenReady(text, to: view, attempts: attempts + 1, baselineInputCount: baseline)
-                return
-            }
-
-            // Send the command text, then press Enter via a key event.
-            // sendText goes through paste encoding: if the shell has
-            // enabled bracketed paste mode, \n would NOT be converted
-            // to \r and the command wouldn't execute. Sending Enter as a
-            // key event bypasses paste encoding entirely.
-            surface.sendText(text)
-            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(50)) {
-                guard view.window != nil else { return }
-                // Even mid-injection: if the user managed to slip a key in
-                // between text and enter, don't press enter on a polluted line.
-                guard view.userInputCount == baseline else { return }
-                surface.sendKeyEvent(Ghostty.Input.KeyEvent(key: .enter, text: "\r"))
-            }
-        }
+    private static func writeRestoreFile(_ command: String, forSurfaceID id: UUID) {
+        let dir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude/ghostty", isDirectory: true)
+        let file = dir.appendingPathComponent("\(id.uuidString).restore")
+        try? command.write(to: file, atomically: true, encoding: .utf8)
     }
 
     /// This restores the focus state of the surfaceview within the given window. When restoring,

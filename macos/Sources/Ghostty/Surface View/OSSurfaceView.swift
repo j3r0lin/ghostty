@@ -37,12 +37,6 @@ extension Ghostty {
         // The detected CLI agent session info (argv, pid) — set when agent is first detected or PID changes
         @Published var detectedAgentSession: CLIAgentSessionInfo?
 
-        // Monotonically increasing counter of user-originated input events
-        // (currently bumped on keyDown). Used by TerminalWindowRestoration to
-        // detect whether the user typed during agent-session restoration and
-        // bail out before injecting a command on top of their input.
-        var userInputCount: Int = 0
-
         // The currently active key tables. Empty if no tables are active.
         @Published var keyTables: [String] = []
 
