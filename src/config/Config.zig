@@ -3300,37 +3300,38 @@ keybind: Keybinds = .{},
 /// This is only supported on macOS.
 @"macos-tab-active-indicator": MacTabActiveIndicator = .none,
 
-/// Visual style for the indeterminate progress indicator shown on a tab
-/// when the terminal reports progress via OSC 9;4.
+/// Visual style for the progress indicator on both the tab and the
+/// terminal surface when progress is reported via OSC 9;4.
 ///
-/// Valid values are:
+/// Tab-only styles:
 ///
-///   * `pulse` - The entire tab background pulses with an accent-colored
-///     translucent overlay.
-///   * `pulse-top` - An accent-colored bar spans the top of the tab and
-///     pulses its opacity. Bar height is set by `macos-tab-progress-width`.
-///   * `pulse-all` - Combines `pulse` and `pulse-top`: the tab background
-///     pulses while a bar at the top pulses independently.
-///   * `pulse-dot` - The tab background pulses (like `pulse`) while a
-///     trailing dot pulses, resembling the unread notification indicator.
-///   * `bounce-top` - An accent-colored bar bounces left and right at the
-///     top of the tab. Bar height is set by `macos-tab-progress-width`.
-///   * `bounce-bottom` - An accent-colored bar bounces left and right at
-///     the bottom of the tab. Bar height is set by `macos-tab-progress-width`.
+///   * `pulse` - The entire tab background pulses.
+///   * `pulse-top` - A bar at the top of the tab pulses its opacity.
+///   * `pulse-all` - Combines `pulse` and `pulse-top`.
+///   * `pulse-dot` - The tab background pulses with a trailing dot.
+///   * `bounce-top` - A bar bounces left and right at the top of the tab.
+///   * `bounce-bottom` - A bar bounces at the bottom of the tab.
+///
+/// Gradient sweep styles (apply to both tab and surface bar):
+///
+///   * `gradient-sweep-rainbow` - A rainbow gradient sweeps across.
+///   * `gradient-sweep-sunset` - An orange-pink-purple gradient.
+///   * `gradient-sweep-neon` - A magenta-cyan gradient.
+///   * `gradient-sweep-ocean` - A cyan-purple gradient.
+///
+/// For tab-only styles, the surface bar falls back to a bouncing bar.
 ///
 /// The default value is `pulse`.
-///
-/// This is only supported on macOS.
-@"macos-tab-progress-style": MacTabProgressStyle = .pulse,
+@"progress-bar-style": ProgressBarStyle = .pulse,
 
-/// The line width in points for line-based tab progress styles
-/// (`pulse-top`, `pulse-all`, `bounce-top`, `bounce-bottom`).
-/// Has no effect on the `pulse` style.
+/// The line width in points for line-based progress styles
+/// (`pulse-top`, `pulse-all`, `bounce-top`, `bounce-bottom`,
+/// and all `gradient-sweep-*` styles).
 ///
 /// The default value is `2`.
 ///
 /// This is only supported on macOS.
-@"macos-tab-progress-width": u8 = 2,
+@"progress-bar-width": u8 = 2,
 
 /// Controls the windowing behavior when dropping a file or folder
 /// onto the Ghostty icon in the macOS dock.
@@ -9147,14 +9148,18 @@ pub const MacTitlebarProxyIcon = enum {
     hidden,
 };
 
-/// See macos-tab-active-indicator
-pub const MacTabProgressStyle = enum {
+/// See progress-bar-style
+pub const ProgressBarStyle = enum {
     pulse,
     @"pulse-top",
     @"pulse-all",
     @"pulse-dot",
     @"bounce-top",
     @"bounce-bottom",
+    @"gradient-sweep-rainbow",
+    @"gradient-sweep-sunset",
+    @"gradient-sweep-neon",
+    @"gradient-sweep-ocean",
 };
 
 pub const MacTabActiveIndicator = enum {

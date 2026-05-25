@@ -5,6 +5,7 @@ import SwiftUI
 /// control.
 struct SurfaceProgressBar: View {
     let report: Ghostty.Action.ProgressReport
+    var style: Ghostty.Config.ProgressBarStyle = .pulse
 
     private var color: Color {
         switch report.state {
@@ -50,7 +51,6 @@ struct SurfaceProgressBar: View {
         GeometryReader { geometry in
             ZStack(alignment: .leading) {
                 if let progress {
-                    // Determinate progress bar with specific percentage
                     Rectangle()
                         .fill(color)
                         .frame(
@@ -59,8 +59,21 @@ struct SurfaceProgressBar: View {
                         )
                         .animation(.easeInOut(duration: 0.2), value: progress)
                 } else {
-                    // Indeterminate states without specific progress - all use bouncing animation
-                    BouncingProgressBar(color: color)
+                    switch style {
+                    case .gradientSweepRainbow:
+                        GradientSweepProgressBar(colors: [.red, .yellow, .green, .cyan])
+                    case .gradientSweepSunset:
+                        GradientSweepProgressBar(colors: [.orange, .pink, .purple])
+                    case .gradientSweepNeon:
+                        GradientSweepProgressBar(colors: [Color(.magenta), .cyan])
+                    case .gradientSweepOcean:
+                        GradientSweepProgressBar(colors: [
+                            Color(red: 0x5f/255.0, green: 0xb3/255.0, blue: 0xb3/255.0),
+                            Color(red: 0xc5/255.0, green: 0x94/255.0, blue: 0xc5/255.0),
+                        ])
+                    default:
+                        BouncingProgressBar(color: color)
+                    }
                 }
             }
         }
@@ -110,3 +123,36 @@ private struct BouncingProgressBar: View {
     }
 }
 
+/// Gradient sweep progress bar — Canvas + TimelineView for guaranteed continuous animation
+private struct GradientSweepProgressBar: View {
+    let colors: [Color]
+    private let duration: Double = 1.5
+
+    var body: some View {
+        TimelineView(.animation) { timeline in
+            let phase = timeline.date.timeIntervalSinceReferenceDate
+                .truncatingRemainder(dividingBy: duration) / duration
+
+            Canvas { context, size in
+                let periodWidth = size.width
+                let totalWidth = periodWidth * 2
+                let offsetX = -periodWidth + CGFloat(phase) * periodWidth
+
+                let allColors = colors + colors + [colors[0]]
+                let stops = allColors.enumerated().map { i, color in
+                    Gradient.Stop(color: color, location: CGFloat(i) / CGFloat(allColors.count - 1))
+                }
+                let gradient = Gradient(stops: stops)
+
+                context.fill(
+                    Path(CGRect(x: offsetX, y: 0, width: totalWidth, height: size.height)),
+                    with: .linearGradient(
+                        gradient,
+                        startPoint: CGPoint(x: offsetX, y: 0),
+                        endPoint: CGPoint(x: offsetX + totalWidth, y: 0)
+                    )
+                )
+            }
+        }
+    }
+}

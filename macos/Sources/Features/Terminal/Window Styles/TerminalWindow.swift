@@ -298,7 +298,7 @@ class TerminalWindow: NSWindow {
         guard let parent = tabButton.layer else { return }
         let bounds = tabButton.bounds
 
-        switch derivedConfig.tabProgressStyle {
+        switch derivedConfig.progressBarStyle {
         case .pulse:
             attachPulseProgress(to: parent, bounds: bounds)
         case .pulseTop:
@@ -313,6 +313,23 @@ class TerminalWindow: NSWindow {
             attachBounceProgress(to: parent, bounds: bounds, top: true)
         case .bounceBottom:
             attachBounceProgress(to: parent, bounds: bounds, top: false)
+        case .gradientSweepRainbow:
+            attachGradientSweepProgress(to: parent, bounds: bounds, colors: [
+                NSColor.systemRed, NSColor.systemYellow, NSColor.systemGreen, NSColor.systemCyan,
+            ])
+        case .gradientSweepSunset:
+            attachGradientSweepProgress(to: parent, bounds: bounds, colors: [
+                NSColor.systemOrange, NSColor.systemPink, NSColor.systemPurple,
+            ])
+        case .gradientSweepNeon:
+            attachGradientSweepProgress(to: parent, bounds: bounds, colors: [
+                NSColor.magenta, NSColor.systemCyan,
+            ])
+        case .gradientSweepOcean:
+            attachGradientSweepProgress(to: parent, bounds: bounds, colors: [
+                NSColor(red: 0x5f/255.0, green: 0xb3/255.0, blue: 0xb3/255.0, alpha: 1),
+                NSColor(red: 0xc5/255.0, green: 0x94/255.0, blue: 0xc5/255.0, alpha: 1),
+            ])
         }
     }
 
@@ -335,7 +352,7 @@ class TerminalWindow: NSWindow {
     }
 
     private func attachPulseLineProgress(to parent: CALayer, bounds: CGRect) {
-        let height = derivedConfig.tabProgressWidth
+        let height = derivedConfig.progressBarWidth
         let y = bounds.height - height
 
         let layer = CALayer()
@@ -390,7 +407,7 @@ class TerminalWindow: NSWindow {
 
     private func attachBounceProgress(to parent: CALayer, bounds: CGRect, top: Bool) {
         let color = NSColor.controlAccentColor
-        let height = derivedConfig.tabProgressWidth
+        let height = derivedConfig.progressBarWidth
         let y: CGFloat = top ? bounds.height - height : 0
 
         let bgLayer = CALayer()
@@ -417,6 +434,37 @@ class TerminalWindow: NSWindow {
         barLayer.add(anim, forKey: "bounce")
 
         progressLayers.append(contentsOf: [bgLayer, barLayer])
+    }
+
+    private func attachGradientSweepProgress(to parent: CALayer, bounds: CGRect, colors: [NSColor]) {
+        let height = derivedConfig.progressBarWidth
+        let y = bounds.height - height
+
+        let sweepLayer = CAGradientLayer()
+        sweepLayer.frame = CGRect(x: 0, y: y, width: bounds.width, height: height)
+        sweepLayer.autoresizingMask = [.layerWidthSizable]
+        sweepLayer.zPosition = 999
+        sweepLayer.startPoint = CGPoint(x: 0, y: 0.5)
+        sweepLayer.endPoint = CGPoint(x: 1, y: 0.5)
+
+        let cgColors = colors.map { $0.cgColor }
+        sweepLayer.colors = cgColors + cgColors + [cgColors[0]]
+        let count = sweepLayer.colors!.count
+        let step = 2.0 / Double(count - 1)
+        let fromLocs = (0..<count).map { NSNumber(value: -1.0 + Double($0) * step) }
+        let toLocs = (0..<count).map { NSNumber(value: Double($0) * step) }
+        sweepLayer.locations = fromLocs
+        parent.addSublayer(sweepLayer)
+
+        let anim = CABasicAnimation(keyPath: "locations")
+        anim.fromValue = fromLocs
+        anim.toValue = toLocs
+        anim.duration = 1.5
+        anim.repeatCount = .infinity
+        anim.timingFunction = CAMediaTimingFunction(name: .linear)
+        sweepLayer.add(anim, forKey: "sweep")
+
+        progressLayers.append(sweepLayer)
     }
 
     // MARK: NSWindow Overrides
@@ -459,7 +507,7 @@ class TerminalWindow: NSWindow {
             ] as? Ghostty.Config else { return }
 
             let oldIndicator = self.derivedConfig.tabActiveIndicator
-            let oldProgressStyle = self.derivedConfig.tabProgressStyle
+            let oldProgressStyle = self.derivedConfig.progressBarStyle
             self.derivedConfig = DerivedConfig(config)
 
             // Refresh the tab active indicator if the style changed.
@@ -470,7 +518,7 @@ class TerminalWindow: NSWindow {
                 }
             }
 
-            if self.derivedConfig.tabProgressStyle != oldProgressStyle, self.showTabProgress {
+            if self.derivedConfig.progressBarStyle != oldProgressStyle, self.showTabProgress {
                 self.removeProgressLayers()
                 self.attachProgressLayers()
                 self.updateTabProgressVisibility()
@@ -983,8 +1031,8 @@ class TerminalWindow: NSWindow {
         let macosWindowButtons: Ghostty.MacOSWindowButtons
         let macosTitlebarStyle: Ghostty.Config.MacOSTitlebarStyle
         let tabActiveIndicator: Ghostty.Config.MacTabActiveIndicator
-        let tabProgressStyle: Ghostty.Config.MacTabProgressStyle
-        let tabProgressWidth: CGFloat
+        let progressBarStyle: Ghostty.Config.ProgressBarStyle
+        let progressBarWidth: CGFloat
         let notificationRingColor: Color?
         let windowCornerRadius: CGFloat
 
@@ -996,8 +1044,8 @@ class TerminalWindow: NSWindow {
             self.backgroundBlur = .disabled
             self.macosTitlebarStyle = .default
             self.tabActiveIndicator = .none
-            self.tabProgressStyle = .pulse
-            self.tabProgressWidth = 2
+            self.progressBarStyle = .pulse
+            self.progressBarWidth = 2
             self.notificationRingColor = nil
             self.windowCornerRadius = 16
         }
@@ -1010,8 +1058,8 @@ class TerminalWindow: NSWindow {
             self.backgroundBlur = config.backgroundBlur
             self.macosTitlebarStyle = config.macosTitlebarStyle
             self.tabActiveIndicator = config.macosTabActiveIndicator
-            self.tabProgressStyle = config.macosTabProgressStyle
-            self.tabProgressWidth = config.macosTabProgressWidth
+            self.progressBarStyle = config.progressBarStyle
+            self.progressBarWidth = config.progressBarWidth
             self.notificationRingColor = config.notificationRingColor
 
             // Set corner radius based on macos-titlebar-style

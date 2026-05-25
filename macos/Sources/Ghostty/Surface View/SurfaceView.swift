@@ -109,7 +109,7 @@ extension Ghostty {
                 // Progress report
                 if let progressReport = surfaceView.progressReport, progressReport.state != .remove {
                     VStack(spacing: 0) {
-                        SurfaceProgressBar(report: progressReport)
+                        SurfaceProgressBar(report: progressReport, style: ghostty.config.progressBarStyle)
                         Spacer()
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
