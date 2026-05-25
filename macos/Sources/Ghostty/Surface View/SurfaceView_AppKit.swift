@@ -1761,32 +1761,40 @@ extension Ghostty {
                 return
             }
 
-            let content = UNMutableNotificationContent()
-            content.title = title
-            content.subtitle = cwdSubtitle
-            content.body = body
-            content.sound = UNNotificationSound.default
-            content.categoryIdentifier = Ghostty.userNotificationCategory
-            content.userInfo = [
-                "surface": self.id.uuidString,
-                "requireFocus": requireFocus,
-            ]
-            if let attachment = detectedAgent?.notificationAttachment() {
-                content.attachments = [attachment]
-            }
+            let center = UNUserNotificationCenter.current()
+            center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+            center.getNotificationSettings { settings in
+                guard settings.authorizationStatus == .authorized else { return }
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    let content = UNMutableNotificationContent()
+                    content.title = title
+                    content.subtitle = cwdSubtitle
+                    content.body = body
+                    content.sound = UNNotificationSound.default
+                    content.categoryIdentifier = Ghostty.userNotificationCategory
+                    content.userInfo = [
+                        "surface": self.id.uuidString,
+                        "requireFocus": requireFocus,
+                    ]
+                    if let attachment = self.detectedAgent?.notificationAttachment() {
+                        content.attachments = [attachment]
+                    }
 
-            let uuid = UUID().uuidString
-            let request = UNNotificationRequest(
-                identifier: uuid,
-                content: content,
-                trigger: nil
-            )
-            UNUserNotificationCenter.current().add(request) { @MainActor error in
-                if let error = error {
-                    AppDelegate.logger.error("Error scheduling user notification: \(error)")
-                    return
+                    let uuid = UUID().uuidString
+                    let request = UNNotificationRequest(
+                        identifier: uuid,
+                        content: content,
+                        trigger: nil
+                    )
+                    center.add(request) { @MainActor error in
+                        if let error = error {
+                            AppDelegate.logger.error("Error scheduling user notification: \(error)")
+                            return
+                        }
+                        self.notificationIdentifiers.insert(uuid)
+                    }
                 }
-                self.notificationIdentifiers.insert(uuid)
             }
         }
 

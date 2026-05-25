@@ -1422,22 +1422,14 @@ extension Ghostty {
             title: String,
             body: String,
             requireFocus: Bool = true) {
-            let center = UNUserNotificationCenter.current()
-            center.requestAuthorization(options: [.alert, .sound]) { _, error in
-                if let error = error {
-                    Ghostty.logger.error("Error while requesting notification authorization: \(error)")
-                }
-            }
-
-            center.getNotificationSettings { settings in
-                guard settings.authorizationStatus == .authorized else { return }
-                DispatchQueue.main.async {
-                    surfaceView.showUserNotification(
-                        title: title,
-                        body: body,
-                        requireFocus: requireFocus
-                    )
-                }
+            // Tab indicator and in-app toast don't require notification
+            // authorization — dispatch them immediately on the main thread.
+            DispatchQueue.main.async {
+                surfaceView.showUserNotification(
+                    title: title,
+                    body: body,
+                    requireFocus: requireFocus
+                )
             }
         }
 
