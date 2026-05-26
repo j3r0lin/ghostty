@@ -7347,14 +7347,8 @@ pub const Keybinds = struct {
 
             try self.set.put(
                 alloc,
-                .{ .key = .{ .unicode = 'g' }, .mods = .{ .super = true, .alt = true } },
-                .{ .focus_last_notification_source = {} },
-            );
-
-            try self.set.put(
-                alloc,
-                .{ .key = .{ .unicode = 'g' }, .mods = .{ .super = true, .alt = true, .shift = true } },
-                .{ .focus_next_unread_notification = {} },
+                .{ .key = .{ .unicode = 'g' }, .mods = .{ .super = true, .shift = true } },
+                .{ .jump_to_unread = {} },
             );
         }
     }

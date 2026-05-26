@@ -818,7 +818,7 @@ pub const Action = union(enum) {
     /// Only implemented on macOS.
     toggle_visibility,
 
-    /// Focus the surface that emitted the most recent desktop notification.
+    /// Jump to the surface that emitted the most recent desktop notification.
     /// This brings its window to the front and moves keyboard focus to it,
     /// the same effect as clicking on the notification banner. After being
     /// triggered (or after the notification is clicked/dismissed) the
@@ -829,21 +829,7 @@ pub const Action = union(enum) {
     /// in the background.
     ///
     /// Only implemented on macOS.
-    focus_last_notification_source,
-
-    /// Focus the surface that emitted the oldest unread desktop notification
-    /// and mark it as read, removing it from the queue. Press repeatedly to
-    /// cycle through all pending notifications in chronological order.
-    ///
-    /// This is useful when multiple surfaces are waiting for input: each
-    /// press takes you to the next one. When the queue is empty, pressing
-    /// again does nothing.
-    ///
-    /// Combine with the `global:` prefix to invoke this while Ghostty is
-    /// in the background.
-    ///
-    /// Only implemented on macOS.
-    focus_next_unread_notification,
+    jump_to_unread,
 
     /// Toggle the window background opacity between transparent and opaque.
     ///
@@ -1331,8 +1317,7 @@ pub const Action = union(enum) {
             .toggle_visibility,
             .check_for_updates,
             .show_gtk_inspector,
-            .focus_last_notification_source,
-            .focus_next_unread_notification,
+            .jump_to_unread,
             => .app,
 
             // These are app but can be special-cased in a surface context.

@@ -125,14 +125,9 @@ pub const Action = union(Key) {
     /// it between fully opaque and the configured background opacity.
     toggle_background_opacity,
 
-    /// Focus the surface that emitted the most recent desktop
+    /// Jump to the surface that emitted the most recent desktop
     /// notification, equivalent to clicking on the notification.
-    focus_last_notification_source,
-
-    /// Focus the surface that emitted the oldest unread desktop
-    /// notification and mark it as read. Repeated invocations cycle
-    /// through all pending notifications in chronological order.
-    focus_next_unread_notification,
+    jump_to_unread,
 
     /// Moves a tab by a relative offset.
     ///
@@ -368,8 +363,7 @@ pub const Action = union(Key) {
         toggle_command_palette,
         toggle_visibility,
         toggle_background_opacity,
-        focus_last_notification_source,
-        focus_next_unread_notification,
+        jump_to_unread,
         move_tab,
         goto_tab,
         goto_split,
