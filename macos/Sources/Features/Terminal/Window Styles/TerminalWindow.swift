@@ -81,10 +81,14 @@ class TerminalWindow: NSWindow {
 
     private var progressLayers: [CALayer] = []
     private weak var progressHiddenShortcutLabel: NSView?
+    private var progressRingView: RainbowRingSpinnerView?
+    private var progressRingHoverView: AgentIconHoverView?
 
     func updateTabProgressVisibility() {
         let hidden = isKeyWindow
         for layer in progressLayers { layer.isHidden = hidden }
+        progressRingHoverView?.isHidden = hidden
+        progressRingView?.isHidden = hidden
     }
 
     /// The detected CLI agent for this window's tab icon.
@@ -237,7 +241,7 @@ class TerminalWindow: NSWindow {
         let hoverView = AgentIconHoverView(
             iconView: iconView,
             closeButtonFinder: { [weak tabButton] in
-                tabButton?.firstDescendant(withClassName: "NSTabCloseButton")
+                tabButton?.firstDescendant(withClassName: "NSRolloverButton")
             }
         )
         hoverView.translatesAutoresizingMaskIntoConstraints = false
@@ -262,26 +266,45 @@ class TerminalWindow: NSWindow {
         tabAgentHoverView = hoverView
     }
 
+    private var isGradientRingStyle: Bool {
+        derivedConfig.tabProgressStyle == .gradientRing
+    }
+
     private func updateTabProgress() {
         if showTabProgress {
-            if progressLayers.isEmpty {
+            if isGradientRingStyle {
+                attachProgressRing()
+            } else if progressLayers.isEmpty {
                 attachProgressLayers()
             }
             let hidden = isKeyWindow
             for layer in progressLayers { layer.isHidden = hidden }
+            progressRingHoverView?.isHidden = hidden
+            progressRingView?.isHidden = hidden
         } else {
             removeProgressLayers()
+            removeProgressRing()
         }
     }
 
     func reattachTabProgressIfNeeded() {
         guard showTabProgress else { return }
-        let detached = progressLayers.isEmpty || progressLayers.contains(where: { $0.superlayer == nil })
-        if detached {
-            removeProgressLayers()
-            attachProgressLayers()
-            let hidden = isKeyWindow
-            for layer in progressLayers { layer.isHidden = hidden }
+        if isGradientRingStyle {
+            if progressRingHoverView?.superview == nil || progressRingView?.superview == nil {
+                removeProgressRing()
+                attachProgressRing()
+                let hidden = isKeyWindow
+                progressRingHoverView?.isHidden = hidden
+                progressRingView?.isHidden = hidden
+            }
+        } else {
+            let detached = progressLayers.isEmpty || progressLayers.contains(where: { $0.superlayer == nil })
+            if detached {
+                removeProgressLayers()
+                attachProgressLayers()
+                let hidden = isKeyWindow
+                for layer in progressLayers { layer.isHidden = hidden }
+            }
         }
     }
 
@@ -298,7 +321,7 @@ class TerminalWindow: NSWindow {
         guard let parent = tabButton.layer else { return }
         let bounds = tabButton.bounds
 
-        switch derivedConfig.progressBarStyle {
+        switch derivedConfig.tabProgressStyle {
         case .pulse:
             attachPulseProgress(to: parent, bounds: bounds)
         case .pulseTop:
@@ -330,6 +353,8 @@ class TerminalWindow: NSWindow {
                 NSColor(red: 0x5f/255.0, green: 0xb3/255.0, blue: 0xb3/255.0, alpha: 1),
                 NSColor(red: 0xc5/255.0, green: 0x94/255.0, blue: 0xc5/255.0, alpha: 1),
             ])
+        case .gradientRing:
+            break
         }
     }
 
@@ -352,7 +377,7 @@ class TerminalWindow: NSWindow {
     }
 
     private func attachPulseLineProgress(to parent: CALayer, bounds: CGRect) {
-        let height = derivedConfig.progressBarWidth
+        let height = derivedConfig.tabProgressWidth
         let y = bounds.height - height
 
         let layer = CALayer()
@@ -407,7 +432,7 @@ class TerminalWindow: NSWindow {
 
     private func attachBounceProgress(to parent: CALayer, bounds: CGRect, top: Bool) {
         let color = NSColor.controlAccentColor
-        let height = derivedConfig.progressBarWidth
+        let height = derivedConfig.tabProgressWidth
         let y: CGFloat = top ? bounds.height - height : 0
 
         let bgLayer = CALayer()
@@ -437,7 +462,7 @@ class TerminalWindow: NSWindow {
     }
 
     private func attachGradientSweepProgress(to parent: CALayer, bounds: CGRect, colors: [NSColor]) {
-        let height = derivedConfig.progressBarWidth
+        let height = derivedConfig.tabProgressWidth
         let y = bounds.height - height
 
         let sweepLayer = CAGradientLayer()
@@ -465,6 +490,70 @@ class TerminalWindow: NSWindow {
         sweepLayer.add(anim, forKey: "sweep")
 
         progressLayers.append(sweepLayer)
+    }
+
+    // MARK: Progress Ring (close button position)
+
+    private func attachProgressRing() {
+        guard let tabButton = findOwnTabButton() else { return }
+        let ringSize: CGFloat = 14
+
+        if let iconView = tabAgentIconView {
+            // Agent icon exists: add ring behind the icon inside its hover view
+            guard progressRingView?.superview == nil else { return }
+            if let hoverView = tabAgentHoverView {
+                let ring = RainbowRingSpinnerView(size: ringSize)
+                ring.translatesAutoresizingMaskIntoConstraints = false
+                hoverView.addSubview(ring, positioned: .below, relativeTo: iconView)
+                NSLayoutConstraint.activate([
+                    ring.centerXAnchor.constraint(equalTo: hoverView.centerXAnchor),
+                    ring.centerYAnchor.constraint(equalTo: hoverView.centerYAnchor),
+                    ring.widthAnchor.constraint(equalToConstant: ringSize),
+                    ring.heightAnchor.constraint(equalToConstant: ringSize),
+                ])
+                progressRingView = ring
+            }
+        } else {
+            // No agent icon: show ring in its own hover view at close button position
+            guard progressRingHoverView == nil else { return }
+
+            let ring = RainbowRingSpinnerView(size: ringSize)
+            ring.translatesAutoresizingMaskIntoConstraints = false
+
+            let hoverView = AgentIconHoverView(
+                iconView: ring,
+                closeButtonFinder: { [weak tabButton] in
+                    tabButton?.firstDescendant(withClassName: "NSRolloverButton")
+                }
+            )
+            hoverView.translatesAutoresizingMaskIntoConstraints = false
+            tabButton.addSubview(hoverView)
+
+            NSLayoutConstraint.activate([
+                hoverView.leadingAnchor.constraint(equalTo: tabButton.leadingAnchor),
+                hoverView.topAnchor.constraint(equalTo: tabButton.topAnchor),
+                hoverView.bottomAnchor.constraint(equalTo: tabButton.bottomAnchor),
+                hoverView.widthAnchor.constraint(equalToConstant: 28),
+            ])
+
+            hoverView.addSubview(ring)
+            NSLayoutConstraint.activate([
+                ring.centerXAnchor.constraint(equalTo: hoverView.centerXAnchor),
+                ring.centerYAnchor.constraint(equalTo: hoverView.centerYAnchor),
+                ring.widthAnchor.constraint(equalToConstant: ringSize),
+                ring.heightAnchor.constraint(equalToConstant: ringSize),
+            ])
+
+            progressRingView = ring
+            progressRingHoverView = hoverView
+        }
+    }
+
+    private func removeProgressRing() {
+        progressRingView?.removeFromSuperview()
+        progressRingView = nil
+        progressRingHoverView?.removeFromSuperview()
+        progressRingHoverView = nil
     }
 
     // MARK: NSWindow Overrides
@@ -507,7 +596,7 @@ class TerminalWindow: NSWindow {
             ] as? Ghostty.Config else { return }
 
             let oldIndicator = self.derivedConfig.tabActiveIndicator
-            let oldProgressStyle = self.derivedConfig.progressBarStyle
+            let oldProgressStyle = self.derivedConfig.tabProgressStyle
             self.derivedConfig = DerivedConfig(config)
 
             // Refresh the tab active indicator if the style changed.
@@ -518,10 +607,10 @@ class TerminalWindow: NSWindow {
                 }
             }
 
-            if self.derivedConfig.progressBarStyle != oldProgressStyle, self.showTabProgress {
+            if self.derivedConfig.tabProgressStyle != oldProgressStyle, self.showTabProgress {
                 self.removeProgressLayers()
-                self.attachProgressLayers()
-                self.updateTabProgressVisibility()
+                self.removeProgressRing()
+                self.updateTabProgress()
             }
         }
 
@@ -1031,8 +1120,8 @@ class TerminalWindow: NSWindow {
         let macosWindowButtons: Ghostty.MacOSWindowButtons
         let macosTitlebarStyle: Ghostty.Config.MacOSTitlebarStyle
         let tabActiveIndicator: Ghostty.Config.MacTabActiveIndicator
-        let progressBarStyle: Ghostty.Config.ProgressBarStyle
-        let progressBarWidth: CGFloat
+        let tabProgressStyle: Ghostty.Config.MacTabProgressStyle
+        let tabProgressWidth: CGFloat
         let notificationRingColor: Color?
         let windowCornerRadius: CGFloat
 
@@ -1044,8 +1133,8 @@ class TerminalWindow: NSWindow {
             self.backgroundBlur = .disabled
             self.macosTitlebarStyle = .default
             self.tabActiveIndicator = .none
-            self.progressBarStyle = .pulse
-            self.progressBarWidth = 2
+            self.tabProgressStyle = .pulse
+            self.tabProgressWidth = 2
             self.notificationRingColor = nil
             self.windowCornerRadius = 16
         }
@@ -1058,8 +1147,8 @@ class TerminalWindow: NSWindow {
             self.backgroundBlur = config.backgroundBlur
             self.macosTitlebarStyle = config.macosTitlebarStyle
             self.tabActiveIndicator = config.macosTabActiveIndicator
-            self.progressBarStyle = config.progressBarStyle
-            self.progressBarWidth = config.progressBarWidth
+            self.tabProgressStyle = config.macosTabProgressStyle
+            self.tabProgressWidth = config.macosTabProgressWidth
             self.notificationRingColor = config.notificationRingColor
 
             // Set corner radius based on macos-titlebar-style
@@ -1410,6 +1499,60 @@ class TabActiveIndicatorLayer: CALayer {
 }
 
 // MARK: - Agent Icon Hover View
+
+private class RainbowRingSpinnerView: NSView {
+    private let gradientLayer = CAGradientLayer()
+    private let maskLayer = CAShapeLayer()
+
+    init(size: CGFloat) {
+        super.init(frame: NSRect(x: 0, y: 0, width: size, height: size))
+        wantsLayer = true
+
+        gradientLayer.type = .conic
+        gradientLayer.colors = [
+            NSColor.systemRed.cgColor,
+            NSColor.systemYellow.cgColor,
+            NSColor.systemGreen.cgColor,
+            NSColor.systemCyan.cgColor,
+            NSColor.systemRed.cgColor,
+        ]
+        gradientLayer.locations = [0, 0.25, 0.5, 0.75, 1.0]
+        gradientLayer.startPoint = CGPoint(x: 0.5, y: 0.5)
+        gradientLayer.endPoint = CGPoint(x: 0.5, y: 0)
+
+        maskLayer.fillColor = nil
+        maskLayer.strokeColor = NSColor.white.cgColor
+        maskLayer.lineWidth = 1.5
+        maskLayer.lineCap = .round
+
+        gradientLayer.mask = maskLayer
+        layer!.addSublayer(gradientLayer)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func layout() {
+        super.layout()
+        gradientLayer.frame = bounds
+
+        let center = CGPoint(x: bounds.midX, y: bounds.midY)
+        let radius = min(bounds.width, bounds.height) / 2 - 1
+        let path = CGMutablePath()
+        path.addArc(center: center, radius: radius, startAngle: -.pi / 2, endAngle: .pi * 1.5, clockwise: false)
+        maskLayer.path = path
+        maskLayer.frame = bounds
+
+        if gradientLayer.animation(forKey: "spin") == nil {
+            let spin = CABasicAnimation(keyPath: "transform.rotation.z")
+            spin.fromValue = 0
+            spin.toValue = 2 * Double.pi
+            spin.duration = 1.5
+            spin.repeatCount = .infinity
+            spin.timingFunction = CAMediaTimingFunction(name: .linear)
+            gradientLayer.add(spin, forKey: "spin")
+        }
+    }
+}
 
 /// Transparent overlay that sits on the close-button area of an NSTabButton.
 /// Shows the agent icon by default; on mouse hover reveals the close button instead.

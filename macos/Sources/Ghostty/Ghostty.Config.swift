@@ -433,20 +433,30 @@ extension Ghostty {
             return MacTabActiveIndicator(rawValue: String(cString: ptr)) ?? defaultValue
         }
 
-        var progressBarStyle: ProgressBarStyle {
-            let defaultValue = ProgressBarStyle.pulse
+        var surfaceProgressStyle: SurfaceProgressStyle {
+            let defaultValue = SurfaceProgressStyle.pulse
             guard let config = self.config else { return defaultValue }
             var v: UnsafePointer<Int8>?
-            let key = "progress-bar-style"
+            let key = "surface-progress-style"
             guard ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8))) else { return defaultValue }
             guard let ptr = v else { return defaultValue }
-            return ProgressBarStyle(rawValue: String(cString: ptr)) ?? defaultValue
+            return SurfaceProgressStyle(rawValue: String(cString: ptr)) ?? defaultValue
         }
 
-        var progressBarWidth: CGFloat {
+        var macosTabProgressStyle: MacTabProgressStyle {
+            let defaultValue = MacTabProgressStyle.pulse
+            guard let config = self.config else { return defaultValue }
+            var v: UnsafePointer<Int8>?
+            let key = "macos-tab-progress-style"
+            guard ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8))) else { return defaultValue }
+            guard let ptr = v else { return defaultValue }
+            return MacTabProgressStyle(rawValue: String(cString: ptr)) ?? defaultValue
+        }
+
+        var macosTabProgressWidth: CGFloat {
             guard let config = self.config else { return 2 }
             var v: UInt8 = 2
-            let key = "progress-bar-width"
+            let key = "macos-tab-progress-width"
             _ = ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8)))
             return CGFloat(v)
         }
@@ -1026,7 +1036,15 @@ extension Ghostty.Config {
         case native, transparent, tabs, hidden
     }
 
-    enum ProgressBarStyle: String {
+    enum SurfaceProgressStyle: String {
+        case pulse
+        case gradientSweepRainbow = "gradient-sweep-rainbow"
+        case gradientSweepSunset = "gradient-sweep-sunset"
+        case gradientSweepNeon = "gradient-sweep-neon"
+        case gradientSweepOcean = "gradient-sweep-ocean"
+    }
+
+    enum MacTabProgressStyle: String {
         case pulse
         case pulseTop = "pulse-top"
         case pulseAll = "pulse-all"
@@ -1037,6 +1055,7 @@ extension Ghostty.Config {
         case gradientSweepSunset = "gradient-sweep-sunset"
         case gradientSweepNeon = "gradient-sweep-neon"
         case gradientSweepOcean = "gradient-sweep-ocean"
+        case gradientRing = "gradient-ring"
     }
 
     enum MacTabActiveIndicator: String {

@@ -5,7 +5,7 @@ import SwiftUI
 /// control.
 struct SurfaceProgressBar: View {
     let report: Ghostty.Action.ProgressReport
-    var style: Ghostty.Config.ProgressBarStyle = .pulse
+    var style: Ghostty.Config.SurfaceProgressStyle = .pulse
 
     private var color: Color {
         switch report.state {
