@@ -562,7 +562,7 @@ class TerminalWindow: NSWindow {
 
     private func attachBrailleSpinner() {
         guard let tabButton = findOwnTabButton() else { return }
-        let spinnerSize: CGFloat = 10
+        let spinnerSize: CGFloat = 14
 
         if tabAgentIconView != nil, let hoverView = tabAgentHoverView {
             guard brailleSpinnerView?.superview == nil else { return }
