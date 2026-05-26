@@ -1586,6 +1586,14 @@ private class BrailleSpinnerView: NSView {
 
     required init?(coder: NSCoder) { fatalError() }
 
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        // Stop the runloop timer if NSTabBar's private machinery detaches
+        // us without going through removeBrailleSpinner; otherwise the
+        // timer keeps firing on a detached view and the view never deinits.
+        if superview == nil { stopAnimating() }
+    }
+
     private func startAnimating() {
         timer = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { [weak self] _ in
             guard let self else { return }
