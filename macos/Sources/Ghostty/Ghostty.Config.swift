@@ -1056,6 +1056,7 @@ extension Ghostty.Config {
         case gradientSweepNeon = "gradient-sweep-neon"
         case gradientSweepOcean = "gradient-sweep-ocean"
         case gradientRing = "gradient-ring"
+        case brailleGradient = "braille-gradient"
     }
 
     enum MacTabActiveIndicator: String {

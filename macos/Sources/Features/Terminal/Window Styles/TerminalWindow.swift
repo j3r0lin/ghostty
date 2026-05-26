@@ -83,12 +83,16 @@ class TerminalWindow: NSWindow {
     private weak var progressHiddenShortcutLabel: NSView?
     private var progressRingView: RainbowRingSpinnerView?
     private var progressRingHoverView: AgentIconHoverView?
+    private var brailleSpinnerView: BrailleSpinnerView?
+    private var brailleSpinnerHoverView: AgentIconHoverView?
 
     func updateTabProgressVisibility() {
         let hidden = isKeyWindow
         for layer in progressLayers { layer.isHidden = hidden }
         progressRingHoverView?.isHidden = hidden
         progressRingView?.isHidden = hidden
+        brailleSpinnerHoverView?.isHidden = hidden
+        brailleSpinnerView?.isHidden = hidden
     }
 
     /// The detected CLI agent for this window's tab icon.
@@ -266,44 +270,45 @@ class TerminalWindow: NSWindow {
         tabAgentHoverView = hoverView
     }
 
-    private var isGradientRingStyle: Bool {
-        derivedConfig.tabProgressStyle == .gradientRing
-    }
-
     private func updateTabProgress() {
         if showTabProgress {
-            if isGradientRingStyle {
+            switch derivedConfig.tabProgressStyle {
+            case .gradientRing:
                 attachProgressRing()
-            } else if progressLayers.isEmpty {
-                attachProgressLayers()
+            case .brailleGradient:
+                attachBrailleSpinner()
+            default:
+                if progressLayers.isEmpty { attachProgressLayers() }
             }
-            let hidden = isKeyWindow
-            for layer in progressLayers { layer.isHidden = hidden }
-            progressRingHoverView?.isHidden = hidden
-            progressRingView?.isHidden = hidden
+            updateTabProgressVisibility()
         } else {
             removeProgressLayers()
             removeProgressRing()
+            removeBrailleSpinner()
         }
     }
 
     func reattachTabProgressIfNeeded() {
         guard showTabProgress else { return }
-        if isGradientRingStyle {
+        switch derivedConfig.tabProgressStyle {
+        case .gradientRing:
             if progressRingHoverView?.superview == nil || progressRingView?.superview == nil {
                 removeProgressRing()
                 attachProgressRing()
-                let hidden = isKeyWindow
-                progressRingHoverView?.isHidden = hidden
-                progressRingView?.isHidden = hidden
+                updateTabProgressVisibility()
             }
-        } else {
+        case .brailleGradient:
+            if brailleSpinnerHoverView?.superview == nil || brailleSpinnerView?.superview == nil {
+                removeBrailleSpinner()
+                attachBrailleSpinner()
+                updateTabProgressVisibility()
+            }
+        default:
             let detached = progressLayers.isEmpty || progressLayers.contains(where: { $0.superlayer == nil })
             if detached {
                 removeProgressLayers()
                 attachProgressLayers()
-                let hidden = isKeyWindow
-                for layer in progressLayers { layer.isHidden = hidden }
+                updateTabProgressVisibility()
             }
         }
     }
@@ -353,7 +358,7 @@ class TerminalWindow: NSWindow {
                 NSColor(red: 0x5f/255.0, green: 0xb3/255.0, blue: 0xb3/255.0, alpha: 1),
                 NSColor(red: 0xc5/255.0, green: 0x94/255.0, blue: 0xc5/255.0, alpha: 1),
             ])
-        case .gradientRing:
+        case .gradientRing, .brailleGradient:
             break
         }
     }
@@ -498,21 +503,18 @@ class TerminalWindow: NSWindow {
         guard let tabButton = findOwnTabButton() else { return }
         let ringSize: CGFloat = 14
 
-        if let iconView = tabAgentIconView {
-            // Agent icon exists: add ring behind the icon inside its hover view
+        if tabAgentIconView != nil, let hoverView = tabAgentHoverView {
             guard progressRingView?.superview == nil else { return }
-            if let hoverView = tabAgentHoverView {
-                let ring = RainbowRingSpinnerView(size: ringSize)
-                ring.translatesAutoresizingMaskIntoConstraints = false
-                hoverView.addSubview(ring, positioned: .below, relativeTo: iconView)
-                NSLayoutConstraint.activate([
-                    ring.centerXAnchor.constraint(equalTo: hoverView.centerXAnchor),
-                    ring.centerYAnchor.constraint(equalTo: hoverView.centerYAnchor),
-                    ring.widthAnchor.constraint(equalToConstant: ringSize),
-                    ring.heightAnchor.constraint(equalToConstant: ringSize),
-                ])
-                progressRingView = ring
-            }
+            let ring = RainbowRingSpinnerView(size: ringSize)
+            ring.translatesAutoresizingMaskIntoConstraints = false
+            tabButton.addSubview(ring)
+            NSLayoutConstraint.activate([
+                ring.leadingAnchor.constraint(equalTo: hoverView.trailingAnchor, constant: -4),
+                ring.centerYAnchor.constraint(equalTo: tabButton.centerYAnchor),
+                ring.widthAnchor.constraint(equalToConstant: ringSize),
+                ring.heightAnchor.constraint(equalToConstant: ringSize),
+            ])
+            progressRingView = ring
         } else {
             // No agent icon: show ring in its own hover view at close button position
             guard progressRingHoverView == nil else { return }
@@ -554,6 +556,62 @@ class TerminalWindow: NSWindow {
         progressRingView = nil
         progressRingHoverView?.removeFromSuperview()
         progressRingHoverView = nil
+    }
+
+    // MARK: Braille Gradient Spinner
+
+    private func attachBrailleSpinner() {
+        guard let tabButton = findOwnTabButton() else { return }
+        let spinnerSize: CGFloat = 10
+
+        if tabAgentIconView != nil, let hoverView = tabAgentHoverView {
+            guard brailleSpinnerView?.superview == nil else { return }
+            let spinner = BrailleSpinnerView(fontSize: spinnerSize)
+            spinner.translatesAutoresizingMaskIntoConstraints = false
+            tabButton.addSubview(spinner)
+            NSLayoutConstraint.activate([
+                spinner.leadingAnchor.constraint(equalTo: hoverView.trailingAnchor, constant: -4),
+                spinner.centerYAnchor.constraint(equalTo: tabButton.centerYAnchor),
+            ])
+            brailleSpinnerView = spinner
+        } else {
+            guard brailleSpinnerHoverView == nil else { return }
+            let spinner = BrailleSpinnerView(fontSize: spinnerSize)
+            spinner.translatesAutoresizingMaskIntoConstraints = false
+
+            let hoverView = AgentIconHoverView(
+                iconView: spinner,
+                closeButtonFinder: { [weak tabButton] in
+                    tabButton?.firstDescendant(withClassName: "NSRolloverButton")
+                }
+            )
+            hoverView.translatesAutoresizingMaskIntoConstraints = false
+            tabButton.addSubview(hoverView)
+
+            NSLayoutConstraint.activate([
+                hoverView.leadingAnchor.constraint(equalTo: tabButton.leadingAnchor),
+                hoverView.topAnchor.constraint(equalTo: tabButton.topAnchor),
+                hoverView.bottomAnchor.constraint(equalTo: tabButton.bottomAnchor),
+                hoverView.widthAnchor.constraint(equalToConstant: 28),
+            ])
+
+            hoverView.addSubview(spinner)
+            NSLayoutConstraint.activate([
+                spinner.centerXAnchor.constraint(equalTo: hoverView.centerXAnchor),
+                spinner.centerYAnchor.constraint(equalTo: hoverView.centerYAnchor),
+            ])
+
+            brailleSpinnerView = spinner
+            brailleSpinnerHoverView = hoverView
+        }
+    }
+
+    private func removeBrailleSpinner() {
+        brailleSpinnerView?.stopAnimating()
+        brailleSpinnerView?.removeFromSuperview()
+        brailleSpinnerView = nil
+        brailleSpinnerHoverView?.removeFromSuperview()
+        brailleSpinnerHoverView = nil
     }
 
     // MARK: NSWindow Overrides
@@ -610,6 +668,7 @@ class TerminalWindow: NSWindow {
             if self.derivedConfig.tabProgressStyle != oldProgressStyle, self.showTabProgress {
                 self.removeProgressLayers()
                 self.removeProgressRing()
+                self.removeBrailleSpinner()
                 self.updateTabProgress()
             }
         }
@@ -1499,6 +1558,61 @@ class TabActiveIndicatorLayer: CALayer {
 }
 
 // MARK: - Agent Icon Hover View
+
+private class BrailleSpinnerView: NSView {
+    private let label: NSTextField
+    private var timer: Timer?
+    private var frameIndex = 0
+
+    private static let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    private static let startColor = NSColor.systemCyan
+    private static let endColor = NSColor.systemPurple
+
+    init(fontSize: CGFloat) {
+        label = NSTextField(labelWithString: Self.frames[0])
+        super.init(frame: .zero)
+        label.font = .monospacedSystemFont(ofSize: fontSize, weight: .medium)
+        label.textColor = Self.startColor
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor),
+            label.topAnchor.constraint(equalTo: topAnchor),
+            label.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        startAnimating()
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    private func startAnimating() {
+        timer = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.frameIndex = (self.frameIndex + 1) % Self.frames.count
+            self.label.stringValue = Self.frames[self.frameIndex]
+            let t = CGFloat(self.frameIndex) / CGFloat(Self.frames.count)
+            self.label.textColor = Self.interpolateColor(t: t)
+        }
+    }
+
+    func stopAnimating() {
+        timer?.invalidate()
+        timer = nil
+    }
+
+    deinit { timer?.invalidate() }
+
+    private static func interpolateColor(t: CGFloat) -> NSColor {
+        guard let f = startColor.usingColorSpace(.sRGB),
+              let e = endColor.usingColorSpace(.sRGB) else { return startColor }
+        var fr: CGFloat = 0, fg: CGFloat = 0, fb: CGFloat = 0, fa: CGFloat = 0
+        var tr: CGFloat = 0, tg: CGFloat = 0, tb: CGFloat = 0, ta: CGFloat = 0
+        f.getRed(&fr, green: &fg, blue: &fb, alpha: &fa)
+        e.getRed(&tr, green: &tg, blue: &tb, alpha: &ta)
+        return NSColor(red: fr + (tr - fr) * t, green: fg + (tg - fg) * t, blue: fb + (tb - fb) * t, alpha: 1)
+    }
+}
 
 private class RainbowRingSpinnerView: NSView {
     private let gradientLayer = CAGradientLayer()

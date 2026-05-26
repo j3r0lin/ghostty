@@ -3326,6 +3326,7 @@ keybind: Keybinds = .{},
 ///   * `gradient-sweep-neon` - A magenta-cyan gradient.
 ///   * `gradient-sweep-ocean` - A cyan-purple gradient.
 ///   * `gradient-ring` - A rainbow ring spinner at the close button area.
+///   * `braille-gradient` - A braille character spinner with color cycling.
 ///
 /// This is only supported on macOS.
 @"macos-tab-progress-style": MacTabProgressStyle = .pulse,
@@ -7347,7 +7348,7 @@ pub const Keybinds = struct {
 
             try self.set.put(
                 alloc,
-                .{ .key = .{ .unicode = 'g' }, .mods = .{ .super = true, .shift = true } },
+                .{ .key = .{ .unicode = 'u' }, .mods = .{ .super = true, .shift = true } },
                 .{ .jump_to_unread = {} },
             );
         }
@@ -9170,6 +9171,7 @@ pub const MacTabProgressStyle = enum {
     @"gradient-sweep-neon",
     @"gradient-sweep-ocean",
     @"gradient-ring",
+    @"braille-gradient",
 };
 
 pub const MacTabActiveIndicator = enum {
