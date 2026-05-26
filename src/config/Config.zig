@@ -7346,10 +7346,11 @@ pub const Keybinds = struct {
                 .{ .esc = "f" },
             );
 
-            try self.set.put(
+            try self.set.putFlags(
                 alloc,
                 .{ .key = .{ .unicode = 'u' }, .mods = .{ .super = true, .shift = true } },
                 .{ .jump_to_unread = {} },
+                .{ .global = true },
             );
         }
     }
