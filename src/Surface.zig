@@ -2962,15 +2962,17 @@ fn maybeHandleBinding(
     });
     const performed = performed: {
         // If this is a global or all action, then we perform it on
-        // the app and it applies to every surface.
+        // the app and it applies to every surface. Multi-instance
+        // fall-through (e.g. cmd+shift+u with an empty queue routing
+        // to another Ghostty) is handled by other instances' CGEventTap,
+        // which fires independently of this in-process responder chain,
+        // so we keep `consumed = true` and only let `performed` reflect
+        // whether anything actually happened.
         if (leaf.flags.global or leaf.flags.all) {
-            self.app.performAllChainedAction(
+            break :performed self.app.performAllChainedAction(
                 self.rt_app,
                 actions,
             );
-
-            // "All" actions are always performed since they are global.
-            break :performed true;
         }
 
         // Perform each action. We are performed if ANY of the chained
@@ -5017,7 +5019,7 @@ pub fn performBindingAction(self: *Surface, action: input.Binding.Action) !bool 
                 {},
             ),
 
-            else => try self.app.performAction(
+            else => return try self.app.performAction(
                 self.rt_app,
                 action.scoped(.app).?,
             ),

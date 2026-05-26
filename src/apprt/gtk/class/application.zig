@@ -1653,7 +1653,7 @@ pub const Application = extern struct {
         action: *const Binding.Action,
         self: *Self,
     ) callconv(.c) void {
-        self.core().performAllAction(self.rt(), action.*) catch |err| {
+        _ = self.core().performAllAction(self.rt(), action.*) catch |err| {
             log.warn("failed to perform action={}", .{err});
         };
     }
@@ -1664,7 +1664,7 @@ pub const Application = extern struct {
         self: *Self,
     ) callconv(.c) void {
         const priv = self.private();
-        priv.core_app.performAction(self.rt(), .reload_config) catch |err| {
+        _ = priv.core_app.performAction(self.rt(), .reload_config) catch |err| {
             log.warn("error reloading config err={}", .{err});
         };
     }
@@ -1675,7 +1675,7 @@ pub const Application = extern struct {
         self: *Self,
     ) callconv(.c) void {
         const priv = self.private();
-        priv.core_app.performAction(self.rt(), .quit) catch |err| {
+        _ = priv.core_app.performAction(self.rt(), .quit) catch |err| {
             log.warn("error quitting err={}", .{err});
         };
     }

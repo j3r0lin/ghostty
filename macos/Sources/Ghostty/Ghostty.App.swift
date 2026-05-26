@@ -611,7 +611,7 @@ extension Ghostty {
                 toggleQuickTerminal(app, target: target)
 
             case GHOSTTY_ACTION_JUMP_TO_UNREAD:
-                jumpToUnread(app, target: target)
+                return jumpToUnread(app, target: target)
 
             case GHOSTTY_ACTION_TOGGLE_VISIBILITY:
                 toggleVisibility(app, target: target)
@@ -1610,10 +1610,10 @@ extension Ghostty {
         private static func jumpToUnread(
             _ app: ghostty_app_t,
             target: ghostty_target_s
-        ) {
-            guard let app_ud = ghostty_app_userdata(app) else { return }
+        ) -> Bool {
+            guard let app_ud = ghostty_app_userdata(app) else { return false }
             let ghosttyApp = Unmanaged<App>.fromOpaque(app_ud).takeUnretainedValue()
-            ghosttyApp.jumpToUnread()
+            return ghosttyApp.jumpToUnread()
         }
 
         private static func setTitle(
@@ -2293,16 +2293,21 @@ extension Ghostty {
 
         /// Focus the surface that emitted the most recent desktop notification.
         /// This is the keybind-driven equivalent of clicking the notification.
-        func jumpToUnread() {
+        /// Returns true if a surface was focused; false if the queue had no
+        /// reachable surface. The bool propagates back through the action
+        /// dispatch so a multi-instance global keybind can fall through to
+        /// another Ghostty instance when this one has nothing to jump to.
+        func jumpToUnread() -> Bool {
             while let uuid = unreadNotificationSurfaceIDs.last {
                 unreadNotificationSurfaceIDs.removeLast()
                 if let surface = delegate?.findSurface(forUUID: uuid) {
                     surface.window?.makeKeyAndOrderFront(nil)
                     NSApp.activate(ignoringOtherApps: true)
                     Ghostty.moveFocus(to: surface)
-                    return
+                    return true
                 }
             }
+            return false
         }
 
         /// Add a surface to the unread notification queue, moving it to the

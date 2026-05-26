@@ -245,7 +245,7 @@ fn drainMailbox(self: *App, rt_app: *apprt.App) !void {
             }
         }
         switch (message) {
-            .open_config => try self.performAction(rt_app, .open_config),
+            .open_config => _ = try self.performAction(rt_app, .open_config),
             .new_window => |msg| try self.newWindow(rt_app, msg),
             .close => |surface| self.closeSurface(surface),
             .surface_message => |msg| try self.surfaceMessage(msg.surface, msg.message),
@@ -257,7 +257,7 @@ fn drainMailbox(self: *App, rt_app: *apprt.App) !void {
             // can try to quit as quickly as possible.
             .quit => {
                 log.info("quit message received, short circuiting mailbox drain", .{});
-                try self.performAction(rt_app, .quit);
+                _ = try self.performAction(rt_app, .quit);
                 return;
             },
         }
@@ -354,10 +354,13 @@ pub fn keyEvent(
     if (!self.focused and !leaf.flags.global) return false;
 
     // Global keybinds are done using performAll so that they
-    // can target all surfaces too.
+    // can target all surfaces too. The chained-action result tells us
+    // whether any action actually produced a visible effect — used by
+    // the macOS CGEventTap to decide whether to consume the event, so
+    // a global keybind in one Ghostty instance doesn't swallow the key
+    // when another instance (or another app) would handle it.
     if (leaf.flags.global) {
-        self.performAllChainedAction(rt_app, actions);
-        return true;
+        return self.performAllChainedAction(rt_app, actions);
     }
 
     // Must be focused to process non-global keybinds
@@ -370,7 +373,7 @@ pub fn keyEvent(
     // actions must be app-scoped.
     for (actions) |action| if (action.scoped(.app) == null) return false;
     for (actions) |action| {
-        self.performAction(
+        _ = self.performAction(
             rt_app,
             action.scoped(.app).?,
         ) catch |err| {
@@ -414,56 +417,70 @@ pub fn colorSchemeEvent(
 /// Perform a binding action. This only accepts actions that are scoped
 /// to the app. Callers can use performAllAction to perform any action
 /// and any non-app-scoped actions will be performed on all surfaces.
+///
+/// Returns whether the action produced a visible effect. Actions that
+/// always produce an effect (creating a window, reloading config, etc.)
+/// return true; actions that may no-op (jump_to_unread with an empty
+/// queue) return whatever the apprt layer reports.
 pub fn performAction(
     self: *App,
     rt_app: *apprt.App,
     action: input.Binding.Action.Scoped(.app),
-) !void {
-    switch (action) {
+) !bool {
+    return switch (action) {
         .unbind => unreachable,
-        .ignore => {},
-        .quit => _ = try rt_app.performAction(.app, .quit, {}),
-        .new_window => _ = try self.newWindow(rt_app, .{ .parent = null }),
-        .open_config => _ = try rt_app.performAction(.app, .open_config, {}),
-        .reload_config => _ = try rt_app.performAction(.app, .reload_config, .{}),
-        .close_all_windows => _ = try rt_app.performAction(.app, .close_all_windows, {}),
-        .toggle_quick_terminal => _ = try rt_app.performAction(.app, .toggle_quick_terminal, {}),
-        .toggle_visibility => _ = try rt_app.performAction(.app, .toggle_visibility, {}),
-        .jump_to_unread => _ = try rt_app.performAction(.app, .jump_to_unread, {}),
-        .check_for_updates => _ = try rt_app.performAction(.app, .check_for_updates, {}),
-        .show_gtk_inspector => _ = try rt_app.performAction(.app, .show_gtk_inspector, {}),
-        .undo => _ = try rt_app.performAction(.app, .undo, {}),
-
-        .redo => _ = try rt_app.performAction(.app, .redo, {}),
-    }
+        .ignore => true,
+        .quit => try rt_app.performAction(.app, .quit, {}),
+        .new_window => new_window: {
+            _ = try self.newWindow(rt_app, .{ .parent = null });
+            break :new_window true;
+        },
+        .open_config => try rt_app.performAction(.app, .open_config, {}),
+        .reload_config => try rt_app.performAction(.app, .reload_config, .{}),
+        .close_all_windows => try rt_app.performAction(.app, .close_all_windows, {}),
+        .toggle_quick_terminal => try rt_app.performAction(.app, .toggle_quick_terminal, {}),
+        .toggle_visibility => try rt_app.performAction(.app, .toggle_visibility, {}),
+        .jump_to_unread => try rt_app.performAction(.app, .jump_to_unread, {}),
+        .check_for_updates => try rt_app.performAction(.app, .check_for_updates, {}),
+        .show_gtk_inspector => try rt_app.performAction(.app, .show_gtk_inspector, {}),
+        .undo => try rt_app.performAction(.app, .undo, {}),
+        .redo => try rt_app.performAction(.app, .redo, {}),
+    };
 }
 
 /// Performs a chained action. We will continue executing each action
-/// even if there is a failure in a prior action.
+/// even if there is a failure in a prior action. Returns true if any
+/// action in the chain produced a visible effect.
 pub fn performAllChainedAction(
     self: *App,
     rt_app: *apprt.App,
     actions: []const input.Binding.Action,
-) void {
+) bool {
+    var any: bool = false;
     for (actions) |action| {
-        self.performAllAction(rt_app, action) catch |err| {
+        const result = self.performAllAction(rt_app, action) catch |err| {
             log.warn("error performing chained action action={s} err={}", .{
                 @tagName(action),
                 err,
             });
+            continue;
         };
+        if (result) any = true;
     }
+    return any;
 }
 
 /// Perform an app-wide binding action. If the action is surface-specific
 /// then it will be performed on all surfaces. To perform only app-scoped
-/// actions, use performAction.
+/// actions, use performAction. Returns true if the action produced a
+/// visible effect (for surface-scoped actions, true if any surface
+/// reported an effect).
 pub fn performAllAction(
     self: *App,
     rt_app: *apprt.App,
     action: input.Binding.Action,
-) !void {
-    switch (action.scope()) {
+) !bool {
+    return switch (action.scope()) {
         // App-scoped actions are handled by the app so that they aren't
         // repeated for each surface (since each surface forwards
         // app-scoped actions back up).
@@ -474,15 +491,21 @@ pub fn performAllAction(
 
         // Surface-scoped actions are performed on all surfaces. Errors
         // are logged but processing continues.
-        .surface => for (self.surfaces.items) |surface| {
-            _ = surface.core().performBindingAction(action) catch |err| {
-                log.warn("error performing binding action on surface ptr={X} err={}", .{
-                    @intFromPtr(surface),
-                    err,
-                });
-            };
+        .surface => surface: {
+            var any: bool = false;
+            for (self.surfaces.items) |surface| {
+                const result = surface.core().performBindingAction(action) catch |err| {
+                    log.warn("error performing binding action on surface ptr={X} err={}", .{
+                        @intFromPtr(surface),
+                        err,
+                    });
+                    continue;
+                };
+                if (result) any = true;
+            }
+            break :surface any;
         },
-    }
+    };
 }
 
 /// Handle a window message
