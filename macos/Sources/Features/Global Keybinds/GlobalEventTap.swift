@@ -88,10 +88,11 @@ class GlobalEventTap {
                 callback: cgEventFlagsChangedHandler(proxy:type:cgEvent:userInfo:),
                 userInfo: nil
         ) else {
-            // Return false if creation failed. This is usually because we don't have
-            // Accessibility permissions but can probably be other reasons I don't
-            // know about.
-            Self.logger.debug("creating global event tap failed, missing permissions?")
+            // Return false if creation failed. Usually this is because we don't
+            // have Accessibility permissions — including the case where the
+            // System Settings entry shows ON but TCC has lost the mapping to
+            // this binary after a re-sign (delete the entry and re-grant to fix).
+            Self.logger.warning("creating global event tap failed, missing Accessibility permission?")
             return false
         }
 
