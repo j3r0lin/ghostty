@@ -3327,6 +3327,7 @@ keybind: Keybinds = .{},
 ///   * `gradient-sweep-ocean` - A cyan-purple gradient.
 ///   * `gradient-ring` - A rainbow ring spinner at the close button area.
 ///   * `braille-gradient` - A braille character spinner with color cycling.
+///   * `glow` - Background tint that breathes with the agent's brand color.
 ///
 /// This is only supported on macOS.
 @"macos-tab-progress-style": MacTabProgressStyle = .pulse,
@@ -3339,6 +3340,18 @@ keybind: Keybinds = .{},
 ///
 /// This is only supported on macOS.
 @"macos-tab-progress-width": u8 = 2,
+
+/// Visual style for the tab unread notification indicator shown on
+/// macOS native tabs when a surface has unread notifications.
+///
+/// Available values:
+///
+///   * `tint-dot` - Background tint with a trailing dot (default).
+///   * `glow` - Background tint using the agent's brand color.
+///   * `off` - No tab unread indicator.
+///
+/// This is only supported on macOS.
+@"macos-tab-unread-style": MacTabUnreadStyle = .@"tint-dot",
 
 /// Controls the windowing behavior when dropping a file or folder
 /// onto the Ghostty icon in the macOS dock.
@@ -9173,6 +9186,14 @@ pub const MacTabProgressStyle = enum {
     @"gradient-sweep-ocean",
     @"gradient-ring",
     @"braille-gradient",
+    glow,
+};
+
+/// See macos-tab-unread-style
+pub const MacTabUnreadStyle = enum {
+    @"tint-dot",
+    glow,
+    off,
 };
 
 pub const MacTabActiveIndicator = enum {

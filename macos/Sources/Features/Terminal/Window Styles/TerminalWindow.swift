@@ -85,6 +85,7 @@ class TerminalWindow: NSWindow {
     private var progressRingHoverView: AgentIconHoverView?
     private var brailleSpinnerView: BrailleSpinnerView?
     private var brailleSpinnerHoverView: AgentIconHoverView?
+    private var progressGlowLayer: CALayer?
 
     func updateTabProgressVisibility() {
         let hidden = isKeyWindow
@@ -93,6 +94,7 @@ class TerminalWindow: NSWindow {
         progressRingView?.isHidden = hidden
         brailleSpinnerHoverView?.isHidden = hidden
         brailleSpinnerView?.isHidden = hidden
+        progressGlowLayer?.isHidden = hidden
     }
 
     /// The detected CLI agent for this window's tab icon.
@@ -100,12 +102,24 @@ class TerminalWindow: NSWindow {
         didSet {
             guard tabAgent != oldValue else { return }
             updateTabAgentIcon()
+
+            // Glow layers snapshot the brand color at attach time; rebuild
+            // them so the new agent's color takes effect.
+            if notificationGlowLayer != nil {
+                removeNotificationGlow()
+                attachNotificationGlow()
+            }
+            if progressGlowLayer != nil {
+                removeProgressGlow()
+                attachProgressGlow()
+            }
         }
     }
 
     private var tabUnreadTintLayer: CALayer?
     private var tabUnreadDotView: NSView?
     private weak var hiddenShortcutLabel: NSView?
+    private var notificationGlowLayer: CALayer?
 
     /// Whether this window's tab should show the unread notification indicator
     /// (background tint + trailing dot that replaces the shortcut label).
@@ -113,9 +127,14 @@ class TerminalWindow: NSWindow {
         didSet {
             guard tabHasUnread != oldValue else { return }
             if tabHasUnread {
-                attachTabUnreadIndicator()
+                switch derivedConfig.tabUnreadStyle {
+                case .glow: attachNotificationGlow()
+                case .tintDot: attachTabUnreadIndicator()
+                case .off: break
+                }
             } else {
                 removeTabUnreadIndicator()
+                removeNotificationGlow()
             }
         }
     }
@@ -182,11 +201,67 @@ class TerminalWindow: NSWindow {
         hiddenShortcutLabel = nil
     }
 
+    private func attachNotificationGlow() {
+        guard notificationGlowLayer == nil, let tabButton = findOwnTabButton() else { return }
+        tabButton.wantsLayer = true
+        guard let parent = tabButton.layer else { return }
+
+        let color: NSColor = tabAgent?.brandColor ?? .controlAccentColor
+        let layer = CALayer()
+        layer.backgroundColor = color.withAlphaComponent(0.30).cgColor
+        layer.frame = tabButton.bounds
+        layer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+        parent.addSublayer(layer)
+        notificationGlowLayer = layer
+
+        if tabUnreadDotView == nil {
+            if let shortcutLabel = findShortcutLabel(in: tabButton) {
+                shortcutLabel.isHidden = true
+                hiddenShortcutLabel = shortcutLabel
+            }
+            let dotSize: CGFloat = 7
+            let dotLayer = CALayer()
+            dotLayer.backgroundColor = color.cgColor
+            dotLayer.cornerRadius = dotSize / 2
+            let dot = NSView()
+            dot.wantsLayer = true
+            dot.layer = dotLayer
+            dot.translatesAutoresizingMaskIntoConstraints = false
+            tabButton.addSubview(dot)
+            NSLayoutConstraint.activate([
+                dot.trailingAnchor.constraint(equalTo: tabButton.trailingAnchor, constant: -10),
+                dot.centerYAnchor.constraint(equalTo: tabButton.centerYAnchor),
+                dot.widthAnchor.constraint(equalToConstant: dotSize),
+                dot.heightAnchor.constraint(equalToConstant: dotSize),
+            ])
+            tabUnreadDotView = dot
+        }
+    }
+
+    private func removeNotificationGlow() {
+        notificationGlowLayer?.removeFromSuperlayer()
+        notificationGlowLayer = nil
+        tabUnreadDotView?.removeFromSuperview()
+        tabUnreadDotView = nil
+        hiddenShortcutLabel?.isHidden = false
+        hiddenShortcutLabel = nil
+    }
+
     func reattachTabUnreadTintIfNeeded() {
         guard tabHasUnread else { return }
-        if tabUnreadTintLayer?.superlayer == nil || tabUnreadDotView?.superview == nil {
-            removeTabUnreadIndicator()
-            attachTabUnreadIndicator()
+        switch derivedConfig.tabUnreadStyle {
+        case .glow:
+            if notificationGlowLayer?.superlayer == nil || tabUnreadDotView?.superview == nil {
+                removeNotificationGlow()
+                attachNotificationGlow()
+            }
+        case .tintDot:
+            if tabUnreadTintLayer?.superlayer == nil || tabUnreadDotView?.superview == nil {
+                removeTabUnreadIndicator()
+                attachTabUnreadIndicator()
+            }
+        case .off:
+            break
         }
     }
 
@@ -277,6 +352,9 @@ class TerminalWindow: NSWindow {
                 attachProgressRing()
             case .brailleGradient:
                 attachBrailleSpinner()
+            case .glow:
+                attachProgressGlow()
+                attachBrailleSpinner()
             default:
                 if progressLayers.isEmpty { attachProgressLayers() }
             }
@@ -285,6 +363,7 @@ class TerminalWindow: NSWindow {
             removeProgressLayers()
             removeProgressRing()
             removeBrailleSpinner()
+            removeProgressGlow()
         }
     }
 
@@ -303,6 +382,19 @@ class TerminalWindow: NSWindow {
                 attachBrailleSpinner()
                 updateTabProgressVisibility()
             }
+        case .glow:
+            var needsReattach = false
+            if progressGlowLayer?.superlayer == nil {
+                removeProgressGlow()
+                attachProgressGlow()
+                needsReattach = true
+            }
+            if brailleSpinnerHoverView?.superview == nil || brailleSpinnerView?.superview == nil {
+                removeBrailleSpinner()
+                attachBrailleSpinner()
+                needsReattach = true
+            }
+            if needsReattach { updateTabProgressVisibility() }
         default:
             let detached = progressLayers.isEmpty || progressLayers.contains(where: { $0.superlayer == nil })
             if detached {
@@ -318,6 +410,35 @@ class TerminalWindow: NSWindow {
         progressLayers.removeAll()
         progressHiddenShortcutLabel?.isHidden = false
         progressHiddenShortcutLabel = nil
+    }
+
+    private func attachProgressGlow() {
+        guard progressGlowLayer == nil, let tabButton = findOwnTabButton() else { return }
+        tabButton.wantsLayer = true
+        guard let parent = tabButton.layer else { return }
+
+        let color: NSColor = tabAgent?.brandColor ?? .controlAccentColor
+        let layer = CALayer()
+        layer.backgroundColor = color.withAlphaComponent(0.05).cgColor
+        layer.frame = tabButton.bounds
+        layer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+        parent.addSublayer(layer)
+
+        let anim = CABasicAnimation(keyPath: "backgroundColor")
+        anim.fromValue = color.withAlphaComponent(0.05).cgColor
+        anim.toValue = color.withAlphaComponent(0.20).cgColor
+        anim.duration = 1.2
+        anim.autoreverses = true
+        anim.repeatCount = .infinity
+        anim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        layer.add(anim, forKey: "glowBreathe")
+
+        progressGlowLayer = layer
+    }
+
+    private func removeProgressGlow() {
+        progressGlowLayer?.removeFromSuperlayer()
+        progressGlowLayer = nil
     }
 
     private func attachProgressLayers() {
@@ -358,7 +479,7 @@ class TerminalWindow: NSWindow {
                 NSColor(red: 0x5f/255.0, green: 0xb3/255.0, blue: 0xb3/255.0, alpha: 1),
                 NSColor(red: 0xc5/255.0, green: 0x94/255.0, blue: 0xc5/255.0, alpha: 1),
             ])
-        case .gradientRing, .brailleGradient:
+        case .gradientRing, .brailleGradient, .glow:
             break
         }
     }
@@ -655,6 +776,7 @@ class TerminalWindow: NSWindow {
 
             let oldIndicator = self.derivedConfig.tabActiveIndicator
             let oldProgressStyle = self.derivedConfig.tabProgressStyle
+            let oldUnreadStyle = self.derivedConfig.tabUnreadStyle
             self.derivedConfig = DerivedConfig(config)
 
             // Refresh the tab active indicator if the style changed.
@@ -669,7 +791,18 @@ class TerminalWindow: NSWindow {
                 self.removeProgressLayers()
                 self.removeProgressRing()
                 self.removeBrailleSpinner()
+                self.removeProgressGlow()
                 self.updateTabProgress()
+            }
+
+            if self.derivedConfig.tabUnreadStyle != oldUnreadStyle, self.tabHasUnread {
+                self.removeTabUnreadIndicator()
+                self.removeNotificationGlow()
+                switch self.derivedConfig.tabUnreadStyle {
+                case .glow: self.attachNotificationGlow()
+                case .tintDot: self.attachTabUnreadIndicator()
+                case .off: break
+                }
             }
         }
 
@@ -1182,6 +1315,7 @@ class TerminalWindow: NSWindow {
         let tabProgressStyle: Ghostty.Config.MacTabProgressStyle
         let tabProgressWidth: CGFloat
         let notificationRingColor: Color?
+        let tabUnreadStyle: Ghostty.Config.MacTabUnreadStyle
         let windowCornerRadius: CGFloat
 
         init() {
@@ -1195,6 +1329,7 @@ class TerminalWindow: NSWindow {
             self.tabProgressStyle = .pulse
             self.tabProgressWidth = 2
             self.notificationRingColor = nil
+            self.tabUnreadStyle = .tintDot
             self.windowCornerRadius = 16
         }
 
@@ -1209,6 +1344,7 @@ class TerminalWindow: NSWindow {
             self.tabProgressStyle = config.macosTabProgressStyle
             self.tabProgressWidth = config.macosTabProgressWidth
             self.notificationRingColor = config.notificationRingColor
+            self.tabUnreadStyle = config.macosTabUnreadStyle
 
             // Set corner radius based on macos-titlebar-style
             // Native, transparent, and hidden styles use 16pt radius

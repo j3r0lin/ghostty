@@ -461,6 +461,16 @@ extension Ghostty {
             return CGFloat(v)
         }
 
+        var macosTabUnreadStyle: MacTabUnreadStyle {
+            let defaultValue = MacTabUnreadStyle.tintDot
+            guard let config = self.config else { return defaultValue }
+            var v: UnsafePointer<Int8>?
+            let key = "macos-tab-unread-style"
+            guard ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8))) else { return defaultValue }
+            guard let ptr = v else { return defaultValue }
+            return MacTabUnreadStyle(rawValue: String(cString: ptr)) ?? defaultValue
+        }
+
         var macosDockDropBehavior: MacDockDropBehavior {
             let defaultValue = MacDockDropBehavior.new_tab
             guard let config = self.config else { return defaultValue }
@@ -1024,6 +1034,12 @@ extension Ghostty.Config {
         case rounded
     }
 
+    enum MacTabUnreadStyle: String {
+        case tintDot = "tint-dot"
+        case glow
+        case off
+    }
+
     struct NotifyOnCommandFinishAction: OptionSet {
         let rawValue: CUnsignedInt
 
@@ -1057,6 +1073,7 @@ extension Ghostty.Config {
         case gradientSweepOcean = "gradient-sweep-ocean"
         case gradientRing = "gradient-ring"
         case brailleGradient = "braille-gradient"
+        case glow
     }
 
     enum MacTabActiveIndicator: String {
