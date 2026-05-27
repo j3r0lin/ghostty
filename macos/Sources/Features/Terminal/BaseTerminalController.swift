@@ -1293,14 +1293,25 @@ class BaseTerminalController: NSWindowController,
                 if tw.tabHasUnread {
                     tw.reattachTabUnreadTintIfNeeded()
                 }
+                tw.updateTabUnreadVisibility()
+                tw.reattachTabSeparatorIfNeeded()
             }
         }
     }
 
     func windowDidResignKey(_ notification: Notification) {
-        // Becoming/losing key means we have to notify our surface(s) that we have focus
-        // so things like cursors blink, pty events are sent, etc.
         self.syncFocusToSurfaceTree()
+
+        DispatchQueue.main.async { [weak self] in
+            guard let tabGroup = self?.window?.tabGroup else { return }
+            for window in tabGroup.windows {
+                guard let tw = window as? TerminalWindow else { continue }
+                if tw.showTabProgress {
+                    tw.updateTabProgressVisibility()
+                }
+                tw.updateTabUnreadVisibility()
+            }
+        }
     }
 
     func windowDidChangeOcclusionState(_ notification: Notification) {

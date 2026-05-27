@@ -97,29 +97,25 @@ class TerminalWindow: NSWindow {
         progressGlowLayer?.isHidden = hidden
     }
 
+    func updateTabUnreadVisibility() {
+        let hidden = isKeyWindow
+        tabUnreadDotView?.isHidden = hidden
+        unreadDotView?.isHidden = hidden
+        hiddenShortcutLabel?.isHidden = !hidden
+        unreadDotHiddenShortcutLabel?.isHidden = !hidden
+    }
+
     /// The detected CLI agent for this window's tab icon.
     var tabAgent: CLIAgent? {
         didSet {
             guard tabAgent != oldValue else { return }
             updateTabAgentIcon()
-
-            // Glow layers snapshot the brand color at attach time; rebuild
-            // them so the new agent's color takes effect.
-            if notificationGlowLayer != nil {
-                removeNotificationGlow()
-                attachNotificationGlow()
-            }
-            if progressGlowLayer != nil {
-                removeProgressGlow()
-                attachProgressGlow()
-            }
         }
     }
 
     private var tabUnreadTintLayer: CALayer?
     private var tabUnreadDotView: NSView?
     private weak var hiddenShortcutLabel: NSView?
-    private var notificationGlowLayer: CALayer?
 
     /// Whether this window's tab should show the unread notification indicator
     /// (background tint + trailing dot that replaces the shortcut label).
@@ -128,13 +124,13 @@ class TerminalWindow: NSWindow {
             guard tabHasUnread != oldValue else { return }
             if tabHasUnread {
                 switch derivedConfig.tabUnreadStyle {
-                case .glow: attachNotificationGlow()
-                case .tintDot: attachTabUnreadIndicator()
+                case .badge: attachUnreadDot()
+                case .highlight: attachTabUnreadIndicator()
                 case .off: break
                 }
             } else {
                 removeTabUnreadIndicator()
-                removeNotificationGlow()
+                removeUnreadDot()
             }
         }
     }
@@ -150,6 +146,25 @@ class TerminalWindow: NSWindow {
         let textFields = tabButton.descendants(withClassName: "NSTextField")
         guard textFields.count >= 2 else { return nil }
         return textFields.max(by: { $0.frame.origin.x < $1.frame.origin.x })
+    }
+
+    private func makeTrailingDot(color: NSColor, size: CGFloat, in tabButton: NSView) -> NSView {
+        let dotLayer = CALayer()
+        dotLayer.backgroundColor = color.cgColor
+        dotLayer.cornerRadius = size / 2
+        dotLayer.masksToBounds = true
+        let dot = NSView()
+        dot.wantsLayer = true
+        dot.layer = dotLayer
+        dot.translatesAutoresizingMaskIntoConstraints = false
+        tabButton.addSubview(dot)
+        NSLayoutConstraint.activate([
+            dot.trailingAnchor.constraint(equalTo: tabButton.trailingAnchor, constant: -10),
+            dot.centerYAnchor.constraint(equalTo: tabButton.centerYAnchor),
+            dot.widthAnchor.constraint(equalToConstant: size),
+            dot.heightAnchor.constraint(equalToConstant: size),
+        ])
+        return dot
     }
 
     private func attachTabUnreadIndicator() {
@@ -171,24 +186,7 @@ class TerminalWindow: NSWindow {
                 shortcutLabel.isHidden = true
                 hiddenShortcutLabel = shortcutLabel
             }
-
-            let dotSize: CGFloat = 7
-            let dotLayer = CALayer()
-            dotLayer.backgroundColor = color.cgColor
-            dotLayer.cornerRadius = dotSize / 2
-
-            let dot = NSView()
-            dot.wantsLayer = true
-            dot.layer = dotLayer
-            dot.translatesAutoresizingMaskIntoConstraints = false
-            tabButton.addSubview(dot)
-            NSLayoutConstraint.activate([
-                dot.trailingAnchor.constraint(equalTo: tabButton.trailingAnchor, constant: -10),
-                dot.centerYAnchor.constraint(equalTo: tabButton.centerYAnchor),
-                dot.widthAnchor.constraint(equalToConstant: dotSize),
-                dot.heightAnchor.constraint(equalToConstant: dotSize),
-            ])
-            tabUnreadDotView = dot
+            tabUnreadDotView = makeTrailingDot(color: color, size: 7, in: tabButton)
         }
     }
 
@@ -201,61 +199,35 @@ class TerminalWindow: NSWindow {
         hiddenShortcutLabel = nil
     }
 
-    private func attachNotificationGlow() {
-        guard notificationGlowLayer == nil, let tabButton = findOwnTabButton() else { return }
-        tabButton.wantsLayer = true
-        guard let parent = tabButton.layer else { return }
+    private var unreadDotView: NSView?
+    private weak var unreadDotHiddenShortcutLabel: NSView?
 
-        let color: NSColor = tabAgent?.brandColor ?? .controlAccentColor
-        let layer = CALayer()
-        layer.backgroundColor = color.withAlphaComponent(0.30).cgColor
-        layer.frame = tabButton.bounds
-        layer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
-        parent.addSublayer(layer)
-        notificationGlowLayer = layer
+    private func attachUnreadDot() {
+        guard unreadDotView == nil, let tabButton = findOwnTabButton() else { return }
 
-        if tabUnreadDotView == nil {
-            if let shortcutLabel = findShortcutLabel(in: tabButton) {
-                shortcutLabel.isHidden = true
-                hiddenShortcutLabel = shortcutLabel
-            }
-            let dotSize: CGFloat = 7
-            let dotLayer = CALayer()
-            dotLayer.backgroundColor = color.cgColor
-            dotLayer.cornerRadius = dotSize / 2
-            let dot = NSView()
-            dot.wantsLayer = true
-            dot.layer = dotLayer
-            dot.translatesAutoresizingMaskIntoConstraints = false
-            tabButton.addSubview(dot)
-            NSLayoutConstraint.activate([
-                dot.trailingAnchor.constraint(equalTo: tabButton.trailingAnchor, constant: -10),
-                dot.centerYAnchor.constraint(equalTo: tabButton.centerYAnchor),
-                dot.widthAnchor.constraint(equalToConstant: dotSize),
-                dot.heightAnchor.constraint(equalToConstant: dotSize),
-            ])
-            tabUnreadDotView = dot
+        if let shortcutLabel = findShortcutLabel(in: tabButton) {
+            shortcutLabel.isHidden = true
+            unreadDotHiddenShortcutLabel = shortcutLabel
         }
+        unreadDotView = makeTrailingDot(color: unreadAccentColor, size: 9, in: tabButton)
     }
 
-    private func removeNotificationGlow() {
-        notificationGlowLayer?.removeFromSuperlayer()
-        notificationGlowLayer = nil
-        tabUnreadDotView?.removeFromSuperview()
-        tabUnreadDotView = nil
-        hiddenShortcutLabel?.isHidden = false
-        hiddenShortcutLabel = nil
+    private func removeUnreadDot() {
+        unreadDotView?.removeFromSuperview()
+        unreadDotView = nil
+        unreadDotHiddenShortcutLabel?.isHidden = false
+        unreadDotHiddenShortcutLabel = nil
     }
 
     func reattachTabUnreadTintIfNeeded() {
         guard tabHasUnread else { return }
         switch derivedConfig.tabUnreadStyle {
-        case .glow:
-            if notificationGlowLayer?.superlayer == nil || tabUnreadDotView?.superview == nil {
-                removeNotificationGlow()
-                attachNotificationGlow()
+        case .badge:
+            if unreadDotView?.superview == nil {
+                removeUnreadDot()
+                attachUnreadDot()
             }
-        case .tintDot:
+        case .highlight:
             if tabUnreadTintLayer?.superlayer == nil || tabUnreadDotView?.superview == nil {
                 removeTabUnreadIndicator()
                 attachTabUnreadIndicator()
@@ -285,6 +257,34 @@ class TerminalWindow: NSWindow {
     func removeTabActiveIndicator() {
         tabActiveIndicatorLayer?.removeFromSuperlayer()
         tabActiveIndicatorLayer = nil
+    }
+
+    private var tabSeparatorLayer: CALayer?
+
+    func attachTabSeparator() {
+        guard tabSeparatorLayer == nil, let tabButton = findOwnTabButton() else { return }
+        let layer = CALayer()
+        layer.backgroundColor = NSColor.white.withAlphaComponent(0.12).cgColor
+        let width: CGFloat = 1
+        let inset: CGFloat = 6
+        let bounds = tabButton.bounds
+        layer.frame = CGRect(x: bounds.width - width, y: inset, width: width, height: max(0, bounds.height - inset * 2))
+        layer.autoresizingMask = [.layerMinXMargin, .layerHeightSizable]
+        tabButton.wantsLayer = true
+        tabButton.layer?.addSublayer(layer)
+        tabSeparatorLayer = layer
+    }
+
+    func removeTabSeparator() {
+        tabSeparatorLayer?.removeFromSuperlayer()
+        tabSeparatorLayer = nil
+    }
+
+    func reattachTabSeparatorIfNeeded() {
+        if tabSeparatorLayer?.superlayer == nil {
+            removeTabSeparator()
+            attachTabSeparator()
+        }
     }
 
     private func findOwnTabButton() -> NSView? {
@@ -417,21 +417,12 @@ class TerminalWindow: NSWindow {
         tabButton.wantsLayer = true
         guard let parent = tabButton.layer else { return }
 
-        let color: NSColor = tabAgent?.brandColor ?? .controlAccentColor
+        let color: NSColor = .controlAccentColor
         let layer = CALayer()
-        layer.backgroundColor = color.withAlphaComponent(0.05).cgColor
+        layer.backgroundColor = color.withAlphaComponent(0.30).cgColor
         layer.frame = tabButton.bounds
         layer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
         parent.addSublayer(layer)
-
-        let anim = CABasicAnimation(keyPath: "backgroundColor")
-        anim.fromValue = color.withAlphaComponent(0.05).cgColor
-        anim.toValue = color.withAlphaComponent(0.20).cgColor
-        anim.duration = 1.2
-        anim.autoreverses = true
-        anim.repeatCount = .infinity
-        anim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        layer.add(anim, forKey: "glowBreathe")
 
         progressGlowLayer = layer
     }
@@ -797,10 +788,10 @@ class TerminalWindow: NSWindow {
 
             if self.derivedConfig.tabUnreadStyle != oldUnreadStyle, self.tabHasUnread {
                 self.removeTabUnreadIndicator()
-                self.removeNotificationGlow()
+                self.removeUnreadDot()
                 switch self.derivedConfig.tabUnreadStyle {
-                case .glow: self.attachNotificationGlow()
-                case .tintDot: self.attachTabUnreadIndicator()
+                case .badge: self.attachUnreadDot()
+                case .highlight: self.attachTabUnreadIndicator()
                 case .off: break
                 }
             }
@@ -1329,7 +1320,7 @@ class TerminalWindow: NSWindow {
             self.tabProgressStyle = .pulse
             self.tabProgressWidth = 2
             self.notificationRingColor = nil
-            self.tabUnreadStyle = .tintDot
+            self.tabUnreadStyle = .highlight
             self.windowCornerRadius = 16
         }
 

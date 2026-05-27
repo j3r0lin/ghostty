@@ -17,14 +17,6 @@ enum CLIAgent: String, CaseIterable, Equatable {
         }
     }
 
-    var brandColor: NSColor {
-        switch self {
-        case .claude: NSColor(red: 0.85, green: 0.50, blue: 0.28, alpha: 1)
-        case .codex: NSColor(red: 0.18, green: 0.72, blue: 0.47, alpha: 1)
-        case .gemini: NSColor(red: 0.35, green: 0.55, blue: 0.92, alpha: 1)
-        }
-    }
-
     var pathKeywords: [String] {
         switch self {
         case .claude: ["/claude/"]

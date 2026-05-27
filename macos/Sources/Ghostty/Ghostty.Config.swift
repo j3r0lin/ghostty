@@ -462,7 +462,7 @@ extension Ghostty {
         }
 
         var macosTabUnreadStyle: MacTabUnreadStyle {
-            let defaultValue = MacTabUnreadStyle.tintDot
+            let defaultValue = MacTabUnreadStyle.highlight
             guard let config = self.config else { return defaultValue }
             var v: UnsafePointer<Int8>?
             let key = "macos-tab-unread-style"
@@ -1035,8 +1035,8 @@ extension Ghostty.Config {
     }
 
     enum MacTabUnreadStyle: String {
-        case tintDot = "tint-dot"
-        case glow
+        case badge
+        case highlight
         case off
     }
 
