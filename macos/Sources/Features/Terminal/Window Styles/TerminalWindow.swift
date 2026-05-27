@@ -125,6 +125,7 @@ class TerminalWindow: NSWindow {
             if tabHasUnread {
                 switch derivedConfig.tabUnreadStyle {
                 case .badge: attachUnreadDot()
+                case .blink: attachUnreadDot(animated: true)
                 case .highlight: attachTabUnreadIndicator()
                 case .off: break
                 }
@@ -148,7 +149,7 @@ class TerminalWindow: NSWindow {
         return textFields.max(by: { $0.frame.origin.x < $1.frame.origin.x })
     }
 
-    private func makeTrailingDot(color: NSColor, size: CGFloat, in tabButton: NSView) -> NSView {
+    private func makeTrailingDot(color: NSColor, size: CGFloat, in tabButton: NSView, animated: Bool = false) -> NSView {
         let dotLayer = CALayer()
         dotLayer.backgroundColor = color.cgColor
         dotLayer.cornerRadius = size / 2
@@ -164,6 +165,15 @@ class TerminalWindow: NSWindow {
             dot.widthAnchor.constraint(equalToConstant: size),
             dot.heightAnchor.constraint(equalToConstant: size),
         ])
+        if animated {
+            let blink = CAKeyframeAnimation(keyPath: "opacity")
+            blink.values = [1.0, 0.0, 1.0]
+            blink.keyTimes = [0, 0.5, 1]
+            blink.calculationMode = .discrete
+            blink.duration = 1.0
+            blink.repeatCount = .infinity
+            dotLayer.add(blink, forKey: "blink")
+        }
         return dot
     }
 
@@ -202,14 +212,14 @@ class TerminalWindow: NSWindow {
     private var unreadDotView: NSView?
     private weak var unreadDotHiddenShortcutLabel: NSView?
 
-    private func attachUnreadDot() {
+    private func attachUnreadDot(animated: Bool = false) {
         guard unreadDotView == nil, let tabButton = findOwnTabButton() else { return }
 
         if let shortcutLabel = findShortcutLabel(in: tabButton) {
             shortcutLabel.isHidden = true
             unreadDotHiddenShortcutLabel = shortcutLabel
         }
-        unreadDotView = makeTrailingDot(color: unreadAccentColor, size: 9, in: tabButton)
+        unreadDotView = makeTrailingDot(color: unreadAccentColor, size: 9, in: tabButton, animated: animated)
     }
 
     private func removeUnreadDot() {
@@ -226,6 +236,11 @@ class TerminalWindow: NSWindow {
             if unreadDotView?.superview == nil {
                 removeUnreadDot()
                 attachUnreadDot()
+            }
+        case .blink:
+            if unreadDotView?.superview == nil {
+                removeUnreadDot()
+                attachUnreadDot(animated: true)
             }
         case .highlight:
             if tabUnreadTintLayer?.superlayer == nil || tabUnreadDotView?.superview == nil {
@@ -264,9 +279,9 @@ class TerminalWindow: NSWindow {
     func attachTabSeparator() {
         guard tabSeparatorLayer == nil, let tabButton = findOwnTabButton() else { return }
         let layer = CALayer()
-        layer.backgroundColor = NSColor.white.withAlphaComponent(0.12).cgColor
+        layer.backgroundColor = NSColor.white.withAlphaComponent(0.13).cgColor
         let width: CGFloat = 1
-        let inset: CGFloat = 6
+        let inset: CGFloat = 0
         let bounds = tabButton.bounds
         layer.frame = CGRect(x: bounds.width - width, y: inset, width: width, height: max(0, bounds.height - inset * 2))
         layer.autoresizingMask = [.layerMinXMargin, .layerHeightSizable]
@@ -791,6 +806,7 @@ class TerminalWindow: NSWindow {
                 self.removeUnreadDot()
                 switch self.derivedConfig.tabUnreadStyle {
                 case .badge: self.attachUnreadDot()
+                case .blink: self.attachUnreadDot(animated: true)
                 case .highlight: self.attachTabUnreadIndicator()
                 case .off: break
                 }

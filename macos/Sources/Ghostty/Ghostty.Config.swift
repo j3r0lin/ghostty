@@ -1036,6 +1036,7 @@ extension Ghostty.Config {
 
     enum MacTabUnreadStyle: String {
         case badge
+        case blink
         case highlight
         case off
     }

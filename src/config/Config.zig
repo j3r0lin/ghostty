@@ -3347,6 +3347,7 @@ keybind: Keybinds = .{},
 /// Available values:
 ///
 ///   * `badge` - Static accent-colored dot replacing the shortcut label.
+///   * `blink` - Blinking accent-colored dot replacing the shortcut label.
 ///   * `highlight` - Background tint with a trailing dot (default).
 ///   * `off` - No tab unread indicator.
 ///
@@ -9192,6 +9193,7 @@ pub const MacTabProgressStyle = enum {
 /// See macos-tab-unread-style
 pub const MacTabUnreadStyle = enum {
     badge,
+    blink,
     highlight,
     off,
 };
