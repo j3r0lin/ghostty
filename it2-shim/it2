@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# PYTHON_ARGCOMPLETE_OK
 """
 ghostty-it2: Ghostty shim for the it2 CLI interface used by Claude Code.
 
@@ -15,6 +16,11 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+
+try:
+    import argcomplete
+except ImportError:
+    argcomplete = None
 
 _LOG_FILE = Path.home() / ".local/state/ghostty/it2-trace.log"
 
@@ -740,6 +746,36 @@ end tell'''
 
 # ── CLI definition ───────────────────────────────────────────────────
 
+def _session_id_completer(**_kwargs):
+    """Tab-completion: return available Ghostty terminal IDs."""
+    try:
+        r = run_applescript(
+            'tell application "Ghostty"\n'
+            '  set out to ""\n'
+            '  repeat with t in every terminal\n'
+            '    if out is not "" then set out to out & linefeed\n'
+            '    set out to out & (id of t)\n'
+            '  end repeat\n'
+            '  return out\n'
+            'end tell'
+        )
+        if r.returncode == 0:
+            return [s for s in r.stdout.strip().splitlines() if s]
+    except Exception:
+        pass
+    return []
+
+
+def _attach_session_completer(parser):
+    """Recursively attach session-id completer to every -s/--session arg."""
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            for sub_parser in action.choices.values():
+                _attach_session_completer(sub_parser)
+        elif "-s" in action.option_strings or "--session" in action.option_strings:
+            action.completer = _session_id_completer
+
+
 def build_parser():
     top = argparse.ArgumentParser(prog="it2", description="Ghostty terminal session control")
     sp = top.add_subparsers(dest="group", help="command group")
@@ -839,6 +875,9 @@ def main():
     _trace(f">>> it2 {' '.join(raw_args)}  (pid={os.getpid()})")
 
     parser = build_parser()
+    if argcomplete is not None:
+        _attach_session_completer(parser)
+        argcomplete.autocomplete(parser)
     args = parser.parse_args(raw_args)
 
     if not hasattr(args, "func"):
