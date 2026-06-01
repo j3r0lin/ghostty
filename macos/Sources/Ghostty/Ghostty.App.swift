@@ -646,6 +646,9 @@ extension Ghostty {
             case GHOSTTY_ACTION_CHECK_FOR_UPDATES:
                 checkForUpdates(app)
 
+            case GHOSTTY_ACTION_RESTART:
+                restartApp()
+
             case GHOSTTY_ACTION_OPEN_URL:
                 return openURL(action.action.open_url)
 
@@ -721,6 +724,19 @@ extension Ghostty {
         ) {
             if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
                 appDelegate.checkForUpdates(nil)
+            }
+        }
+
+        private static func restartApp() {
+            let url = URL(fileURLWithPath: Bundle.main.bundlePath)
+            let config = NSWorkspace.OpenConfiguration()
+            config.createsNewApplicationInstance = true
+            NSWorkspace.shared.openApplication(at: url, configuration: config) { app, err in
+                guard app != nil, err == nil else {
+                    Ghostty.logger.warning("restart failed: \(err?.localizedDescription ?? "unknown")")
+                    return
+                }
+                exit(0)
             }
         }
 

@@ -308,6 +308,8 @@ pub const Action = union(Key) {
 
     check_for_updates,
 
+    restart,
+
     /// Open a URL using the native OS mechanisms. On macOS this might be `open`
     /// or on Linux this might be `xdg-open`. The exact mechanism is up to the
     /// apprt.
@@ -404,6 +406,7 @@ pub const Action = union(Key) {
         undo,
         redo,
         check_for_updates,
+        restart,
         open_url,
         show_child_exited,
         progress_report,

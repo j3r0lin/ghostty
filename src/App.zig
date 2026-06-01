@@ -442,6 +442,7 @@ pub fn performAction(
         .toggle_visibility => try rt_app.performAction(.app, .toggle_visibility, {}),
         .jump_to_unread => try rt_app.performAction(.app, .jump_to_unread, {}),
         .check_for_updates => try rt_app.performAction(.app, .check_for_updates, {}),
+        .restart => try rt_app.performAction(.app, .restart, {}),
         .show_gtk_inspector => try rt_app.performAction(.app, .show_gtk_inspector, {}),
         .undo => try rt_app.performAction(.app, .undo, {}),
         .redo => try rt_app.performAction(.app, .redo, {}),

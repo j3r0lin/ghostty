@@ -657,6 +657,12 @@ fn actionCommands(action: Action.Key) []const Command {
             .description = "Check for updates to the application.",
         }},
 
+        .restart => comptime &.{.{
+            .action = .restart,
+            .title = "Restart Application",
+            .description = "Restart the application.",
+        }},
+
         .undo => comptime &.{.{
             .action = .undo,
             .title = "Undo",
