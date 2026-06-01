@@ -3273,18 +3273,6 @@ keybind: Keybinds = .{},
 /// editor, etc.
 @"macos-titlebar-proxy-icon": MacTitlebarProxyIcon = .visible,
 
-/// Visual style for the terminal surface progress bar shown at the bottom
-/// of the terminal content area when progress is reported via OSC 9;4.
-///
-///   * `pulse` - A bar bounces left and right (default).
-///   * `gradient-sweep-rainbow` - A rainbow gradient sweeps across.
-///   * `gradient-sweep-sunset` - An orange-pink-purple gradient.
-///   * `gradient-sweep-neon` - A magenta-cyan gradient.
-///   * `gradient-sweep-ocean` - A cyan-purple gradient.
-///
-/// The default value is `pulse`.
-@"surface-progress-style": SurfaceProgressStyle = .pulse,
-
 /// Controls the windowing behavior when dropping a file or folder
 /// onto the Ghostty icon in the macOS dock.
 ///
@@ -3699,40 +3687,6 @@ else
 ///
 /// This is a macOS-only option.
 @"desktop-notification-style": DesktopNotificationStyle = .auto,
-
-/// Controls the visual style of the notification ring shown around
-/// terminal panes that have unread desktop notifications.
-///
-/// Available values:
-///
-///   * `off` - No notification ring is shown.
-///   * `solid` - Uniform semi-transparent blue border.
-///   * `gradient` - Static angular gradient border.
-///   * `corners` - Highlight marks on the four corners only.
-///   * `double` - Inner and outer double border lines.
-///   * `accent` - Top and bottom highlight bars.
-///   * `left-bar` - Left-side vertical bar.
-///   * `inner-glow` - Gradient border with inner glow feel.
-///   * `dashed` - Dashed border.
-///   * `top-bar` - Top highlight bar only.
-///   * `rounded` - Rounded inset border.
-///
-/// This is a macOS-only option.
-@"notification-ring-style": NotificationRingStyle = .solid,
-
-/// Line width for the notification ring border in pixels.
-///
-/// This is a macOS-only option.
-@"notification-ring-width": f64 = 1.5,
-
-/// Color for the notification ring. If not set, the system accent color
-/// is used.
-///
-/// This accepts the same color formats as `background` and `foreground`
-/// (e.g. `#RRGGBB`, named X11 colors).
-///
-/// This is a macOS-only option.
-@"notification-ring-color": ?Color = null,
 
 /// If `true` (default), applications running in the terminal can show
 /// graphical progress bars using the ConEmu OSC 9;4 escape sequence.
@@ -5333,20 +5287,6 @@ pub const DesktopNotificationStyle = enum {
     auto,
     toast,
     native,
-};
-
-pub const NotificationRingStyle = enum {
-    off,
-    solid,
-    gradient,
-    corners,
-    double,
-    accent,
-    @"left-bar",
-    @"inner-glow",
-    dashed,
-    @"top-bar",
-    rounded,
 };
 
 pub const LinkPreviews = enum {
@@ -9093,15 +9033,6 @@ pub const MacTitlebarStyle = enum {
 pub const MacTitlebarProxyIcon = enum {
     visible,
     hidden,
-};
-
-/// See surface-progress-style
-pub const SurfaceProgressStyle = enum {
-    pulse,
-    @"gradient-sweep-rainbow",
-    @"gradient-sweep-sunset",
-    @"gradient-sweep-neon",
-    @"gradient-sweep-ocean",
 };
 
 /// See macos-hidden

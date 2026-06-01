@@ -119,9 +119,6 @@ class TerminalWindow: NSWindow {
     }
 
     private var unreadAccentColor: NSColor {
-        if let custom = derivedConfig.notificationRingColor {
-            return NSColor(custom)
-        }
         return NSColor.controlAccentColor
     }
 
@@ -943,7 +940,6 @@ class TerminalWindow: NSWindow {
         let backgroundOpacity: Double
         let macosWindowButtons: Ghostty.MacOSWindowButtons
         let macosTitlebarStyle: Ghostty.Config.MacOSTitlebarStyle
-        let notificationRingColor: Color?
         let windowCornerRadius: CGFloat
 
         init() {
@@ -953,7 +949,6 @@ class TerminalWindow: NSWindow {
             self.macosWindowButtons = .visible
             self.backgroundBlur = .disabled
             self.macosTitlebarStyle = .default
-            self.notificationRingColor = nil
             self.windowCornerRadius = 16
         }
 
@@ -964,7 +959,6 @@ class TerminalWindow: NSWindow {
             self.macosWindowButtons = config.macosWindowButtons
             self.backgroundBlur = config.backgroundBlur
             self.macosTitlebarStyle = config.macosTitlebarStyle
-            self.notificationRingColor = config.notificationRingColor
 
             // Set corner radius based on macos-titlebar-style
             // Native, transparent, and hidden styles use 16pt radius

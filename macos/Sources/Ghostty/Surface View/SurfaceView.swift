@@ -109,7 +109,7 @@ extension Ghostty {
                 // Progress report
                 if let progressReport = surfaceView.progressReport, progressReport.state != .remove {
                     VStack(spacing: 0) {
-                        SurfaceProgressBar(report: progressReport, style: ghostty.config.surfaceProgressStyle)
+                        SurfaceProgressBar(report: progressReport)
                         Spacer()
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -176,10 +176,7 @@ extension Ghostty {
 
                 // Show blue ring when this surface has unread notifications
                 NotificationRingOverlay(
-                    hasUnread: ghostty.unreadNotificationSurfaceIDs.contains(surfaceView.id),
-                    style: ghostty.config.notificationRingStyle,
-                    lineWidth: ghostty.config.notificationRingWidth,
-                    color: ghostty.config.notificationRingColor
+                    hasUnread: ghostty.unreadNotificationSurfaceIDs.contains(surfaceView.id)
                 )
 
                 // Show a highlight effect when this surface needs attention
@@ -973,101 +970,15 @@ extension Ghostty {
 
     struct NotificationRingOverlay: View {
         let hasUnread: Bool
-        let style: Config.NotificationRingStyle
-        let lineWidth: CGFloat
-        var color: Color?
 
         var body: some View {
-            if hasUnread && style != .off {
-                ringView
-                    .allowsHitTesting(false)
-                    .transition(.opacity.animation(.easeInOut(duration: 0.3)))
-            }
-        }
-
-        @ViewBuilder
-        private var ringView: some View {
-            let c = color ?? .accentColor
-            switch style {
-            case .solid:
-                Rectangle().strokeBorder(c.opacity(0.5), lineWidth: lineWidth)
-            case .gradient:
-                Rectangle().strokeBorder(
-                    AngularGradient(
-                        gradient: Gradient(colors: [
-                            c.opacity(0.7), c.opacity(0.2),
-                            Color.cyan.opacity(0.5), c.opacity(0.2),
-                            c.opacity(0.7),
-                        ]),
-                        center: .center
-                    ),
-                    lineWidth: lineWidth
-                )
-            case .corners:
-                NotificationRingCorners(lineWidth: lineWidth, color: c)
-            case .double:
-                ZStack {
-                    Rectangle().strokeBorder(c.opacity(0.4), lineWidth: lineWidth)
-                    Rectangle().strokeBorder(c.opacity(0.25), lineWidth: lineWidth).padding(lineWidth + 2)
-                }
-            case .accent:
+            if hasUnread {
                 VStack(spacing: 0) {
-                    Rectangle().fill(c.opacity(0.6)).frame(height: lineWidth)
-                    Spacer()
-                    Rectangle().fill(c.opacity(0.6)).frame(height: lineWidth)
-                }
-            case .leftBar:
-                HStack(spacing: 0) {
-                    Rectangle().fill(c.opacity(0.6)).frame(width: lineWidth)
+                    Rectangle().fill(Color.accentColor.opacity(0.7)).frame(height: 2)
                     Spacer()
                 }
-            case .innerGlow:
-                ZStack {
-                    Rectangle().strokeBorder(
-                        LinearGradient(colors: [c.opacity(0.5), c.opacity(0.15)], startPoint: .top, endPoint: .bottom),
-                        lineWidth: lineWidth
-                    )
-                    Rectangle().strokeBorder(c.opacity(0.08), lineWidth: lineWidth * 3).padding(-lineWidth)
-                }
-            case .dashed:
-                Rectangle().strokeBorder(c.opacity(0.5), style: StrokeStyle(lineWidth: lineWidth, dash: [8, 4]))
-            case .topBar:
-                VStack(spacing: 0) {
-                    Rectangle().fill(c.opacity(0.7)).frame(height: lineWidth)
-                    Spacer()
-                }
-            case .rounded:
-                RoundedRectangle(cornerRadius: 6).strokeBorder(c.opacity(0.5), lineWidth: lineWidth).padding(2)
-            case .off:
-                EmptyView()
-            }
-        }
-    }
-
-    private struct NotificationRingCorners: View {
-        let lineWidth: CGFloat
-        let color: Color
-        private let cornerLength: CGFloat = 20
-
-        var body: some View {
-            GeometryReader { geo in
-                let w = geo.size.width
-                let h = geo.size.height
-                Path { p in
-                    p.move(to: CGPoint(x: 0, y: cornerLength))
-                    p.addLine(to: CGPoint(x: 0, y: 0))
-                    p.addLine(to: CGPoint(x: cornerLength, y: 0))
-                    p.move(to: CGPoint(x: w - cornerLength, y: 0))
-                    p.addLine(to: CGPoint(x: w, y: 0))
-                    p.addLine(to: CGPoint(x: w, y: cornerLength))
-                    p.move(to: CGPoint(x: w, y: h - cornerLength))
-                    p.addLine(to: CGPoint(x: w, y: h))
-                    p.addLine(to: CGPoint(x: w - cornerLength, y: h))
-                    p.move(to: CGPoint(x: cornerLength, y: h))
-                    p.addLine(to: CGPoint(x: 0, y: h))
-                    p.addLine(to: CGPoint(x: 0, y: h - cornerLength))
-                }
-                .stroke(color.opacity(0.6), lineWidth: lineWidth)
+                .allowsHitTesting(false)
+                .transition(.opacity.animation(.easeInOut(duration: 0.3)))
             }
         }
     }

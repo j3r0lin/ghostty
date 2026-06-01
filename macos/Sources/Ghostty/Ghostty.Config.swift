@@ -164,31 +164,6 @@ extension Ghostty {
             return DesktopNotificationStyle(rawValue: String(cString: ptr)) ?? .auto
         }
 
-        var notificationRingStyle: NotificationRingStyle {
-            guard let config = self.config else { return .solid }
-            var v: UnsafePointer<Int8>?
-            let key = "notification-ring-style"
-            guard ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8))) else { return .solid }
-            guard let ptr = v else { return .solid }
-            return NotificationRingStyle(rawValue: String(cString: ptr)) ?? .solid
-        }
-
-        var notificationRingWidth: CGFloat {
-            guard let config = self.config else { return 1.5 }
-            var v: Double = 0
-            let key = "notification-ring-width"
-            guard ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8))) else { return 1.5 }
-            return CGFloat(v)
-        }
-
-        var notificationRingColor: Color? {
-            guard let config = self.config else { return nil }
-            var color: ghostty_config_color_s = .init()
-            let key = "notification-ring-color"
-            guard ghostty_config_get(config, &color, key, UInt(key.lengthOfBytes(using: .utf8))) else { return nil }
-            return .init(red: Double(color.r) / 255, green: Double(color.g) / 255, blue: Double(color.b) / 255)
-        }
-
         var notifyOnCommandFinish: NotifyOnCommandFinish {
             guard let config = self.config else { return .never }
             var v: UnsafePointer<Int8>?
@@ -421,16 +396,6 @@ extension Ghostty {
             guard let ptr = v else { return defaultValue }
             let str = String(cString: ptr)
             return MacOSTitlebarProxyIcon(rawValue: str) ?? defaultValue
-        }
-
-        var surfaceProgressStyle: SurfaceProgressStyle {
-            let defaultValue = SurfaceProgressStyle.pulse
-            guard let config = self.config else { return defaultValue }
-            var v: UnsafePointer<Int8>?
-            let key = "surface-progress-style"
-            guard ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8))) else { return defaultValue }
-            guard let ptr = v else { return defaultValue }
-            return SurfaceProgressStyle(rawValue: String(cString: ptr)) ?? defaultValue
         }
 
         var macosDockDropBehavior: MacDockDropBehavior {
@@ -982,20 +947,6 @@ extension Ghostty.Config {
         case native
     }
 
-    enum NotificationRingStyle: String {
-        case off
-        case solid
-        case gradient
-        case corners
-        case double
-        case accent
-        case leftBar = "left-bar"
-        case innerGlow = "inner-glow"
-        case dashed
-        case topBar = "top-bar"
-        case rounded
-    }
-
     struct NotifyOnCommandFinishAction: OptionSet {
         let rawValue: CUnsignedInt
 
@@ -1006,14 +957,6 @@ extension Ghostty.Config {
     enum MacOSTitlebarStyle: String {
         static let `default` = MacOSTitlebarStyle.transparent
         case native, transparent, tabs, hidden
-    }
-
-    enum SurfaceProgressStyle: String {
-        case pulse
-        case gradientSweepRainbow = "gradient-sweep-rainbow"
-        case gradientSweepSunset = "gradient-sweep-sunset"
-        case gradientSweepNeon = "gradient-sweep-neon"
-        case gradientSweepOcean = "gradient-sweep-ocean"
     }
 
 }

@@ -5,7 +5,6 @@ import SwiftUI
 /// control.
 struct SurfaceProgressBar: View {
     let report: Ghostty.Action.ProgressReport
-    var style: Ghostty.Config.SurfaceProgressStyle = .pulse
 
     private var color: Color {
         switch report.state {
@@ -59,21 +58,7 @@ struct SurfaceProgressBar: View {
                         )
                         .animation(.easeInOut(duration: 0.2), value: progress)
                 } else {
-                    switch style {
-                    case .gradientSweepRainbow:
-                        GradientSweepProgressBar(colors: [.red, .yellow, .green, .cyan])
-                    case .gradientSweepSunset:
-                        GradientSweepProgressBar(colors: [.orange, .pink, .purple])
-                    case .gradientSweepNeon:
-                        GradientSweepProgressBar(colors: [Color(.magenta), .cyan])
-                    case .gradientSweepOcean:
-                        GradientSweepProgressBar(colors: [
-                            Color(red: 0x5f/255.0, green: 0xb3/255.0, blue: 0xb3/255.0),
-                            Color(red: 0xc5/255.0, green: 0x94/255.0, blue: 0xc5/255.0),
-                        ])
-                    default:
-                        BouncingProgressBar(color: color)
-                    }
+                    GradientSweepProgressBar(colors: [.red, .yellow, .green, .cyan])
                 }
             }
         }
@@ -84,42 +69,6 @@ struct SurfaceProgressBar: View {
         .accessibilityAddTraits(.updatesFrequently)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityValue(accessibilityValue)
-    }
-}
-
-/// Bouncing progress bar for indeterminate states
-private struct BouncingProgressBar: View {
-    let color: Color
-    @State private var position: CGFloat = 0
-
-    private let barWidthRatio: CGFloat = 0.25
-
-    var body: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .leading) {
-                Rectangle()
-                    .fill(color.opacity(0.3))
-
-                Rectangle()
-                    .fill(color)
-                    .frame(
-                        width: geometry.size.width * barWidthRatio,
-                        height: geometry.size.height
-                    )
-                    .offset(x: position * (geometry.size.width * (1 - barWidthRatio)))
-            }
-        }
-        .onAppear {
-            withAnimation(
-                .easeInOut(duration: 1.2)
-                .repeatForever(autoreverses: true)
-            ) {
-                position = 1
-            }
-        }
-        .onDisappear {
-            position = 0
-        }
     }
 }
 
