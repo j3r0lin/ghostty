@@ -139,8 +139,7 @@ final class NotificationToastManager {
     private func positionPanels() {
         guard let screen = NSScreen.main else { return }
         let frame = screen.visibleFrame
-        // Top edge of the next visible toast.
-        var topY = frame.maxY - edgeInset
+        var topY = frame.maxY - 38
 
         for entry in entries {
             let panelW = entry.panel.frame.width
