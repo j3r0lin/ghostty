@@ -84,16 +84,18 @@ class TerminalWindow: NSWindow {
     private var progressGlowLayer: CALayer?
 
     func updateTabProgressVisibility() {
-        let hidden = isKeyWindow
-        brailleSpinnerHoverView?.isHidden = hidden
-        brailleSpinnerView?.isHidden = hidden
-        progressGlowLayer?.isHidden = hidden
+        // Only the glow background is suppressed on the active tab; the spinner
+        // is kept so the active tab still shows it's busy.
+        progressGlowLayer?.isHidden = isKeyWindow
+        brailleSpinnerHoverView?.isHidden = false
+        brailleSpinnerView?.isHidden = false
     }
 
     func updateTabUnreadVisibility() {
-        let hidden = isKeyWindow
-        unreadDotView?.isHidden = hidden
-        unreadDotHiddenShortcutLabel?.isHidden = !hidden
+        // Unread dot is kept regardless of active state; the shortcut label it
+        // replaced stays hidden while there's an unread indicator.
+        unreadDotView?.isHidden = false
+        unreadDotHiddenShortcutLabel?.isHidden = true
     }
 
     /// The detected CLI agent for this window's tab icon.
@@ -324,7 +326,7 @@ class TerminalWindow: NSWindow {
 
         let color: NSColor = .controlAccentColor
         let layer = CALayer()
-        layer.backgroundColor = color.withAlphaComponent(0.60).cgColor
+        layer.backgroundColor = color.withAlphaComponent(0.15).cgColor
         layer.frame = tabButton.bounds
         layer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
         parent.addSublayer(layer)
