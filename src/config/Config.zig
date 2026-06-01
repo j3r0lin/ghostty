@@ -3273,33 +3273,6 @@ keybind: Keybinds = .{},
 /// editor, etc.
 @"macos-titlebar-proxy-icon": MacTitlebarProxyIcon = .visible,
 
-/// Visual indicator style for the active (selected) tab when multiple
-/// tabs are present. This helps distinguish the active tab from
-/// inactive ones, especially with the `tabs` titlebar style where all
-/// tabs share the same background color.
-///
-/// Valid values are:
-///
-///   * `none` - No additional indicator beyond the default system styling.
-///   * `bottom-line` - A 2px accent-colored line at the bottom of the tab.
-///   * `lighter-bg` - The active tab is brightened; inactive tabs are dimmed.
-///   * `top-line` - A 2px accent-colored line at the top of the tab.
-///   * `floating-card` - The active tab appears as a raised card with a
-///     subtle border.
-///   * `background-tint` - The active tab has an accent-colored translucent
-///     overlay.
-///   * `tint-line` - Combines `background-tint` with `bottom-line`.
-///   * `inner-glow` - A soft radial glow emanating from the tab center.
-///   * `connected-tab` - The active tab background matches the content area,
-///     with a top accent line, visually connecting tab to content.
-///   * `side-fade` - The active tab center is brightened, fading to the edges.
-///   * `shadow-lift` - The active tab appears lifted with a drop shadow.
-///
-/// The default value is `none`.
-///
-/// This is only supported on macOS.
-@"macos-tab-active-indicator": MacTabActiveIndicator = .none,
-
 /// Visual style for the terminal surface progress bar shown at the bottom
 /// of the terminal content area when progress is reported via OSC 9;4.
 ///
@@ -3311,48 +3284,6 @@ keybind: Keybinds = .{},
 ///
 /// The default value is `pulse`.
 @"surface-progress-style": SurfaceProgressStyle = .pulse,
-
-/// Visual style for the tab progress indicator shown on macOS native
-/// tabs when progress is reported via OSC 9;4.
-///
-///   * `pulse` - The entire tab background pulses (default).
-///   * `pulse-top` - A bar at the top of the tab pulses its opacity.
-///   * `pulse-all` - Combines `pulse` and `pulse-top`.
-///   * `pulse-dot` - The tab background pulses with a trailing dot.
-///   * `bounce-top` - A bar bounces left and right at the top of the tab.
-///   * `bounce-bottom` - A bar bounces at the bottom of the tab.
-///   * `gradient-sweep-rainbow` - A rainbow gradient sweeps across.
-///   * `gradient-sweep-sunset` - An orange-pink-purple gradient.
-///   * `gradient-sweep-neon` - A magenta-cyan gradient.
-///   * `gradient-sweep-ocean` - A cyan-purple gradient.
-///   * `gradient-ring` - A rainbow ring spinner at the close button area.
-///   * `braille-gradient` - A braille character spinner with color cycling.
-///   * `glow` - Background tint that breathes with the agent's brand color.
-///
-/// This is only supported on macOS.
-@"macos-tab-progress-style": MacTabProgressStyle = .pulse,
-
-/// The line width in points for line-based tab progress styles
-/// (`pulse-top`, `pulse-all`, `bounce-top`, `bounce-bottom`,
-/// and all `gradient-sweep-*` styles).
-///
-/// The default value is `2`.
-///
-/// This is only supported on macOS.
-@"macos-tab-progress-width": u8 = 2,
-
-/// Visual style for the tab unread notification indicator shown on
-/// macOS native tabs when a surface has unread notifications.
-///
-/// Available values:
-///
-///   * `badge` - Static accent-colored dot replacing the shortcut label.
-///   * `blink` - Blinking accent-colored dot replacing the shortcut label.
-///   * `highlight` - Background tint with a trailing dot (default).
-///   * `off` - No tab unread indicator.
-///
-/// This is only supported on macOS.
-@"macos-tab-unread-style": MacTabUnreadStyle = .highlight,
 
 /// Controls the windowing behavior when dropping a file or folder
 /// onto the Ghostty icon in the macOS dock.
@@ -9171,45 +9102,6 @@ pub const SurfaceProgressStyle = enum {
     @"gradient-sweep-sunset",
     @"gradient-sweep-neon",
     @"gradient-sweep-ocean",
-};
-
-/// See macos-tab-progress-style
-pub const MacTabProgressStyle = enum {
-    pulse,
-    @"pulse-top",
-    @"pulse-all",
-    @"pulse-dot",
-    @"bounce-top",
-    @"bounce-bottom",
-    @"gradient-sweep-rainbow",
-    @"gradient-sweep-sunset",
-    @"gradient-sweep-neon",
-    @"gradient-sweep-ocean",
-    @"gradient-ring",
-    @"braille-gradient",
-    glow,
-};
-
-/// See macos-tab-unread-style
-pub const MacTabUnreadStyle = enum {
-    badge,
-    blink,
-    highlight,
-    off,
-};
-
-pub const MacTabActiveIndicator = enum {
-    none,
-    @"bottom-line",
-    @"lighter-bg",
-    @"top-line",
-    @"floating-card",
-    @"background-tint",
-    @"tint-line",
-    @"inner-glow",
-    @"connected-tab",
-    @"side-fade",
-    @"shadow-lift",
 };
 
 /// See macos-hidden

@@ -79,19 +79,12 @@ class TerminalWindow: NSWindow {
         }
     }
 
-    private var progressLayers: [CALayer] = []
-    private weak var progressHiddenShortcutLabel: NSView?
-    private var progressRingView: RainbowRingSpinnerView?
-    private var progressRingHoverView: AgentIconHoverView?
     private var brailleSpinnerView: BrailleSpinnerView?
     private var brailleSpinnerHoverView: AgentIconHoverView?
     private var progressGlowLayer: CALayer?
 
     func updateTabProgressVisibility() {
         let hidden = isKeyWindow
-        for layer in progressLayers { layer.isHidden = hidden }
-        progressRingHoverView?.isHidden = hidden
-        progressRingView?.isHidden = hidden
         brailleSpinnerHoverView?.isHidden = hidden
         brailleSpinnerView?.isHidden = hidden
         progressGlowLayer?.isHidden = hidden
@@ -99,9 +92,7 @@ class TerminalWindow: NSWindow {
 
     func updateTabUnreadVisibility() {
         let hidden = isKeyWindow
-        tabUnreadDotView?.isHidden = hidden
         unreadDotView?.isHidden = hidden
-        hiddenShortcutLabel?.isHidden = !hidden
         unreadDotHiddenShortcutLabel?.isHidden = !hidden
     }
 
@@ -113,24 +104,15 @@ class TerminalWindow: NSWindow {
         }
     }
 
-    private var tabUnreadTintLayer: CALayer?
-    private var tabUnreadDotView: NSView?
-    private weak var hiddenShortcutLabel: NSView?
 
     /// Whether this window's tab should show the unread notification indicator
-    /// (background tint + trailing dot that replaces the shortcut label).
+    /// (blinking accent-colored dot replacing the shortcut label).
     var tabHasUnread: Bool = false {
         didSet {
             guard tabHasUnread != oldValue else { return }
             if tabHasUnread {
-                switch derivedConfig.tabUnreadStyle {
-                case .badge: attachUnreadDot()
-                case .blink: attachUnreadDot(animated: true)
-                case .highlight: attachTabUnreadIndicator()
-                case .off: break
-                }
+                attachUnreadDot(animated: true)
             } else {
-                removeTabUnreadIndicator()
                 removeUnreadDot()
             }
         }
@@ -177,38 +159,6 @@ class TerminalWindow: NSWindow {
         return dot
     }
 
-    private func attachTabUnreadIndicator() {
-        guard let tabButton = findOwnTabButton() else { return }
-        let color = unreadAccentColor
-
-        if tabUnreadTintLayer == nil {
-            let layer = CALayer()
-            layer.backgroundColor = color.withAlphaComponent(0.20).cgColor
-            layer.frame = CGRect(origin: .zero, size: tabButton.bounds.size)
-            layer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
-            tabButton.wantsLayer = true
-            tabButton.layer?.addSublayer(layer)
-            tabUnreadTintLayer = layer
-        }
-
-        if tabUnreadDotView == nil {
-            if let shortcutLabel = findShortcutLabel(in: tabButton) {
-                shortcutLabel.isHidden = true
-                hiddenShortcutLabel = shortcutLabel
-            }
-            tabUnreadDotView = makeTrailingDot(color: color, size: 7, in: tabButton)
-        }
-    }
-
-    private func removeTabUnreadIndicator() {
-        tabUnreadTintLayer?.removeFromSuperlayer()
-        tabUnreadTintLayer = nil
-        tabUnreadDotView?.removeFromSuperview()
-        tabUnreadDotView = nil
-        hiddenShortcutLabel?.isHidden = false
-        hiddenShortcutLabel = nil
-    }
-
     private var unreadDotView: NSView?
     private weak var unreadDotHiddenShortcutLabel: NSView?
 
@@ -231,37 +181,20 @@ class TerminalWindow: NSWindow {
 
     func reattachTabUnreadTintIfNeeded() {
         guard tabHasUnread else { return }
-        switch derivedConfig.tabUnreadStyle {
-        case .badge:
-            if unreadDotView?.superview == nil {
-                removeUnreadDot()
-                attachUnreadDot()
-            }
-        case .blink:
-            if unreadDotView?.superview == nil {
-                removeUnreadDot()
-                attachUnreadDot(animated: true)
-            }
-        case .highlight:
-            if tabUnreadTintLayer?.superlayer == nil || tabUnreadDotView?.superview == nil {
-                removeTabUnreadIndicator()
-                attachTabUnreadIndicator()
-            }
-        case .off:
-            break
+        if unreadDotView?.superview == nil {
+            removeUnreadDot()
+            attachUnreadDot(animated: true)
         }
     }
 
-    private var tabActiveIndicatorLayer: TabActiveIndicatorLayer?
+    private var tabActiveIndicatorLayer: CALayer?
 
     func attachTabActiveIndicator() {
-        let style = derivedConfig.tabActiveIndicator
-        guard style != .none else { removeTabActiveIndicator(); return }
-        if tabActiveIndicatorLayer?.indicatorStyle == style,
-           tabActiveIndicatorLayer?.superlayer != nil { return }
+        if tabActiveIndicatorLayer?.superlayer != nil { return }
         removeTabActiveIndicator()
         guard let tabButton = findOwnTabButton() else { return }
-        let layer = TabActiveIndicatorLayer(indicatorStyle: style)
+        let layer = CALayer()
+        layer.backgroundColor = NSColor.white.withAlphaComponent(0.08).cgColor
         layer.frame = CGRect(origin: .zero, size: tabButton.bounds.size)
         layer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
         tabButton.wantsLayer = true
@@ -362,21 +295,10 @@ class TerminalWindow: NSWindow {
 
     private func updateTabProgress() {
         if showTabProgress {
-            switch derivedConfig.tabProgressStyle {
-            case .gradientRing:
-                attachProgressRing()
-            case .brailleGradient:
-                attachBrailleSpinner()
-            case .glow:
-                attachProgressGlow()
-                attachBrailleSpinner()
-            default:
-                if progressLayers.isEmpty { attachProgressLayers() }
-            }
+            attachProgressGlow()
+            attachBrailleSpinner()
             updateTabProgressVisibility()
         } else {
-            removeProgressLayers()
-            removeProgressRing()
             removeBrailleSpinner()
             removeProgressGlow()
         }
@@ -384,47 +306,18 @@ class TerminalWindow: NSWindow {
 
     func reattachTabProgressIfNeeded() {
         guard showTabProgress else { return }
-        switch derivedConfig.tabProgressStyle {
-        case .gradientRing:
-            if progressRingHoverView?.superview == nil || progressRingView?.superview == nil {
-                removeProgressRing()
-                attachProgressRing()
-                updateTabProgressVisibility()
-            }
-        case .brailleGradient:
-            if brailleSpinnerHoverView?.superview == nil || brailleSpinnerView?.superview == nil {
-                removeBrailleSpinner()
-                attachBrailleSpinner()
-                updateTabProgressVisibility()
-            }
-        case .glow:
-            var needsReattach = false
-            if progressGlowLayer?.superlayer == nil {
-                removeProgressGlow()
-                attachProgressGlow()
-                needsReattach = true
-            }
-            if brailleSpinnerHoverView?.superview == nil || brailleSpinnerView?.superview == nil {
-                removeBrailleSpinner()
-                attachBrailleSpinner()
-                needsReattach = true
-            }
-            if needsReattach { updateTabProgressVisibility() }
-        default:
-            let detached = progressLayers.isEmpty || progressLayers.contains(where: { $0.superlayer == nil })
-            if detached {
-                removeProgressLayers()
-                attachProgressLayers()
-                updateTabProgressVisibility()
-            }
+        var needsReattach = false
+        if progressGlowLayer?.superlayer == nil {
+            removeProgressGlow()
+            attachProgressGlow()
+            needsReattach = true
         }
-    }
-
-    private func removeProgressLayers() {
-        for layer in progressLayers { layer.removeFromSuperlayer() }
-        progressLayers.removeAll()
-        progressHiddenShortcutLabel?.isHidden = false
-        progressHiddenShortcutLabel = nil
+        if brailleSpinnerHoverView?.superview == nil || brailleSpinnerView?.superview == nil {
+            removeBrailleSpinner()
+            attachBrailleSpinner()
+            needsReattach = true
+        }
+        if needsReattach { updateTabProgressVisibility() }
     }
 
     private func attachProgressGlow() {
@@ -434,7 +327,7 @@ class TerminalWindow: NSWindow {
 
         let color: NSColor = .controlAccentColor
         let layer = CALayer()
-        layer.backgroundColor = color.withAlphaComponent(0.30).cgColor
+        layer.backgroundColor = color.withAlphaComponent(0.60).cgColor
         layer.frame = tabButton.bounds
         layer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
         parent.addSublayer(layer)
@@ -445,244 +338,6 @@ class TerminalWindow: NSWindow {
     private func removeProgressGlow() {
         progressGlowLayer?.removeFromSuperlayer()
         progressGlowLayer = nil
-    }
-
-    private func attachProgressLayers() {
-        guard progressLayers.isEmpty, let tabButton = findOwnTabButton() else { return }
-        tabButton.wantsLayer = true
-        guard let parent = tabButton.layer else { return }
-        let bounds = tabButton.bounds
-
-        switch derivedConfig.tabProgressStyle {
-        case .pulse:
-            attachPulseProgress(to: parent, bounds: bounds)
-        case .pulseTop:
-            attachPulseLineProgress(to: parent, bounds: bounds)
-        case .pulseAll:
-            attachPulseProgress(to: parent, bounds: bounds)
-            attachPulseLineProgress(to: parent, bounds: bounds)
-        case .pulseDot:
-            attachPulseProgress(to: parent, bounds: bounds)
-            attachPulseDot(to: parent, bounds: bounds)
-        case .bounceTop:
-            attachBounceProgress(to: parent, bounds: bounds, top: true)
-        case .bounceBottom:
-            attachBounceProgress(to: parent, bounds: bounds, top: false)
-        case .gradientSweepRainbow:
-            attachGradientSweepProgress(to: parent, bounds: bounds, colors: [
-                NSColor.systemRed, NSColor.systemYellow, NSColor.systemGreen, NSColor.systemCyan,
-            ])
-        case .gradientSweepSunset:
-            attachGradientSweepProgress(to: parent, bounds: bounds, colors: [
-                NSColor.systemOrange, NSColor.systemPink, NSColor.systemPurple,
-            ])
-        case .gradientSweepNeon:
-            attachGradientSweepProgress(to: parent, bounds: bounds, colors: [
-                NSColor.magenta, NSColor.systemCyan,
-            ])
-        case .gradientSweepOcean:
-            attachGradientSweepProgress(to: parent, bounds: bounds, colors: [
-                NSColor(red: 0x5f/255.0, green: 0xb3/255.0, blue: 0xb3/255.0, alpha: 1),
-                NSColor(red: 0xc5/255.0, green: 0x94/255.0, blue: 0xc5/255.0, alpha: 1),
-            ])
-        case .gradientRing, .brailleGradient, .glow:
-            break
-        }
-    }
-
-    private func attachPulseProgress(to parent: CALayer, bounds: CGRect) {
-        let layer = CALayer()
-        layer.backgroundColor = NSColor.controlAccentColor.cgColor
-        layer.frame = bounds
-        layer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
-        parent.addSublayer(layer)
-
-        let anim = CABasicAnimation(keyPath: "opacity")
-        anim.fromValue = 0.08
-        anim.toValue = 0.5
-        anim.duration = 0.9
-        anim.autoreverses = true
-        anim.repeatCount = .infinity
-        anim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        layer.add(anim, forKey: "bgPulse")
-        progressLayers.append(layer)
-    }
-
-    private func attachPulseLineProgress(to parent: CALayer, bounds: CGRect) {
-        let height = derivedConfig.tabProgressWidth
-        let y = bounds.height - height
-
-        let layer = CALayer()
-        layer.backgroundColor = NSColor.controlAccentColor.cgColor
-        layer.frame = CGRect(x: 0, y: y, width: bounds.width, height: height)
-        layer.autoresizingMask = [.layerWidthSizable]
-        parent.addSublayer(layer)
-
-        let anim = CABasicAnimation(keyPath: "opacity")
-        anim.fromValue = 0.3
-        anim.toValue = 1.0
-        anim.duration = 0.9
-        anim.autoreverses = true
-        anim.repeatCount = .infinity
-        anim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        layer.add(anim, forKey: "linePulse")
-
-        progressLayers.append(layer)
-    }
-
-    private func attachPulseDot(to parent: CALayer, bounds: CGRect) {
-        if let tabButton = findOwnTabButton(),
-           let shortcutLabel = findShortcutLabel(in: tabButton) {
-            shortcutLabel.isHidden = true
-            progressHiddenShortcutLabel = shortcutLabel
-        }
-
-        let color = NSColor.controlAccentColor
-        let dotSize: CGFloat = 7
-        let dot = CALayer()
-        dot.backgroundColor = color.cgColor
-        dot.cornerRadius = dotSize / 2
-        dot.frame = CGRect(
-            x: bounds.width - 10 - dotSize,
-            y: (bounds.height - dotSize) / 2,
-            width: dotSize,
-            height: dotSize
-        )
-        parent.addSublayer(dot)
-
-        let anim = CABasicAnimation(keyPath: "opacity")
-        anim.fromValue = 0.4
-        anim.toValue = 1.0
-        anim.duration = 0.9
-        anim.autoreverses = true
-        anim.repeatCount = .infinity
-        anim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        dot.add(anim, forKey: "dotPulse")
-
-        progressLayers.append(dot)
-    }
-
-    private func attachBounceProgress(to parent: CALayer, bounds: CGRect, top: Bool) {
-        let color = NSColor.controlAccentColor
-        let height = derivedConfig.tabProgressWidth
-        let y: CGFloat = top ? bounds.height - height : 0
-
-        let bgLayer = CALayer()
-        bgLayer.backgroundColor = color.withAlphaComponent(0.15).cgColor
-        bgLayer.frame = CGRect(x: 0, y: y, width: bounds.width, height: height)
-        bgLayer.autoresizingMask = [.layerWidthSizable]
-        parent.addSublayer(bgLayer)
-
-        let barLayer = CALayer()
-        barLayer.backgroundColor = color.cgColor
-        barLayer.cornerRadius = 1
-        let barWidth = max(bounds.width * 0.25, 20)
-        barLayer.frame = CGRect(x: 0, y: y, width: barWidth, height: height)
-        parent.addSublayer(barLayer)
-
-        let maxX = max(bounds.width - barWidth, 0)
-        let anim = CABasicAnimation(keyPath: "position.x")
-        anim.fromValue = barWidth / 2
-        anim.toValue = maxX + barWidth / 2
-        anim.duration = 1.2
-        anim.autoreverses = true
-        anim.repeatCount = .infinity
-        anim.timingFunction = CAMediaTimingFunction(controlPoints: 0.42, 0, 0.58, 1)
-        barLayer.add(anim, forKey: "bounce")
-
-        progressLayers.append(contentsOf: [bgLayer, barLayer])
-    }
-
-    private func attachGradientSweepProgress(to parent: CALayer, bounds: CGRect, colors: [NSColor]) {
-        let height = derivedConfig.tabProgressWidth
-        let y = bounds.height - height
-
-        let sweepLayer = CAGradientLayer()
-        sweepLayer.frame = CGRect(x: 0, y: y, width: bounds.width, height: height)
-        sweepLayer.autoresizingMask = [.layerWidthSizable]
-        sweepLayer.zPosition = 999
-        sweepLayer.startPoint = CGPoint(x: 0, y: 0.5)
-        sweepLayer.endPoint = CGPoint(x: 1, y: 0.5)
-
-        let cgColors = colors.map { $0.cgColor }
-        sweepLayer.colors = cgColors + cgColors + [cgColors[0]]
-        let count = sweepLayer.colors!.count
-        let step = 2.0 / Double(count - 1)
-        let fromLocs = (0..<count).map { NSNumber(value: -1.0 + Double($0) * step) }
-        let toLocs = (0..<count).map { NSNumber(value: Double($0) * step) }
-        sweepLayer.locations = fromLocs
-        parent.addSublayer(sweepLayer)
-
-        let anim = CABasicAnimation(keyPath: "locations")
-        anim.fromValue = fromLocs
-        anim.toValue = toLocs
-        anim.duration = 1.5
-        anim.repeatCount = .infinity
-        anim.timingFunction = CAMediaTimingFunction(name: .linear)
-        sweepLayer.add(anim, forKey: "sweep")
-
-        progressLayers.append(sweepLayer)
-    }
-
-    // MARK: Progress Ring (close button position)
-
-    private func attachProgressRing() {
-        guard let tabButton = findOwnTabButton() else { return }
-        let ringSize: CGFloat = 14
-
-        if tabAgentIconView != nil, let hoverView = tabAgentHoverView {
-            guard progressRingView?.superview == nil else { return }
-            let ring = RainbowRingSpinnerView(size: ringSize)
-            ring.translatesAutoresizingMaskIntoConstraints = false
-            tabButton.addSubview(ring)
-            NSLayoutConstraint.activate([
-                ring.leadingAnchor.constraint(equalTo: hoverView.trailingAnchor, constant: -4),
-                ring.centerYAnchor.constraint(equalTo: tabButton.centerYAnchor),
-                ring.widthAnchor.constraint(equalToConstant: ringSize),
-                ring.heightAnchor.constraint(equalToConstant: ringSize),
-            ])
-            progressRingView = ring
-        } else {
-            // No agent icon: show ring in its own hover view at close button position
-            guard progressRingHoverView == nil else { return }
-
-            let ring = RainbowRingSpinnerView(size: ringSize)
-            ring.translatesAutoresizingMaskIntoConstraints = false
-
-            let hoverView = AgentIconHoverView(
-                iconView: ring,
-                closeButtonFinder: { [weak tabButton] in
-                    tabButton?.firstDescendant(withClassName: "NSRolloverButton")
-                }
-            )
-            hoverView.translatesAutoresizingMaskIntoConstraints = false
-            tabButton.addSubview(hoverView)
-
-            NSLayoutConstraint.activate([
-                hoverView.leadingAnchor.constraint(equalTo: tabButton.leadingAnchor),
-                hoverView.topAnchor.constraint(equalTo: tabButton.topAnchor),
-                hoverView.bottomAnchor.constraint(equalTo: tabButton.bottomAnchor),
-                hoverView.widthAnchor.constraint(equalToConstant: 28),
-            ])
-
-            hoverView.addSubview(ring)
-            NSLayoutConstraint.activate([
-                ring.centerXAnchor.constraint(equalTo: hoverView.centerXAnchor),
-                ring.centerYAnchor.constraint(equalTo: hoverView.centerYAnchor),
-                ring.widthAnchor.constraint(equalToConstant: ringSize),
-                ring.heightAnchor.constraint(equalToConstant: ringSize),
-            ])
-
-            progressRingView = ring
-            progressRingHoverView = hoverView
-        }
-    }
-
-    private func removeProgressRing() {
-        progressRingView?.removeFromSuperview()
-        progressRingView = nil
-        progressRingHoverView?.removeFromSuperview()
-        progressRingHoverView = nil
     }
 
     // MARK: Braille Gradient Spinner
@@ -780,37 +435,7 @@ class TerminalWindow: NSWindow {
                 Notification.Name.GhosttyConfigChangeKey
             ] as? Ghostty.Config else { return }
 
-            let oldIndicator = self.derivedConfig.tabActiveIndicator
-            let oldProgressStyle = self.derivedConfig.tabProgressStyle
-            let oldUnreadStyle = self.derivedConfig.tabUnreadStyle
             self.derivedConfig = DerivedConfig(config)
-
-            // Refresh the tab active indicator if the style changed.
-            if self.derivedConfig.tabActiveIndicator != oldIndicator {
-                self.removeTabActiveIndicator()
-                if self.isKeyWindow {
-                    self.attachTabActiveIndicator()
-                }
-            }
-
-            if self.derivedConfig.tabProgressStyle != oldProgressStyle, self.showTabProgress {
-                self.removeProgressLayers()
-                self.removeProgressRing()
-                self.removeBrailleSpinner()
-                self.removeProgressGlow()
-                self.updateTabProgress()
-            }
-
-            if self.derivedConfig.tabUnreadStyle != oldUnreadStyle, self.tabHasUnread {
-                self.removeTabUnreadIndicator()
-                self.removeUnreadDot()
-                switch self.derivedConfig.tabUnreadStyle {
-                case .badge: self.attachUnreadDot()
-                case .blink: self.attachUnreadDot(animated: true)
-                case .highlight: self.attachTabUnreadIndicator()
-                case .off: break
-                }
-            }
         }
 
         // This is required so that window restoration properly creates our tabs
@@ -1318,11 +943,7 @@ class TerminalWindow: NSWindow {
         let backgroundOpacity: Double
         let macosWindowButtons: Ghostty.MacOSWindowButtons
         let macosTitlebarStyle: Ghostty.Config.MacOSTitlebarStyle
-        let tabActiveIndicator: Ghostty.Config.MacTabActiveIndicator
-        let tabProgressStyle: Ghostty.Config.MacTabProgressStyle
-        let tabProgressWidth: CGFloat
         let notificationRingColor: Color?
-        let tabUnreadStyle: Ghostty.Config.MacTabUnreadStyle
         let windowCornerRadius: CGFloat
 
         init() {
@@ -1332,11 +953,7 @@ class TerminalWindow: NSWindow {
             self.macosWindowButtons = .visible
             self.backgroundBlur = .disabled
             self.macosTitlebarStyle = .default
-            self.tabActiveIndicator = .none
-            self.tabProgressStyle = .pulse
-            self.tabProgressWidth = 2
             self.notificationRingColor = nil
-            self.tabUnreadStyle = .highlight
             self.windowCornerRadius = 16
         }
 
@@ -1347,11 +964,7 @@ class TerminalWindow: NSWindow {
             self.macosWindowButtons = config.macosWindowButtons
             self.backgroundBlur = config.backgroundBlur
             self.macosTitlebarStyle = config.macosTitlebarStyle
-            self.tabActiveIndicator = config.macosTabActiveIndicator
-            self.tabProgressStyle = config.macosTabProgressStyle
-            self.tabProgressWidth = config.macosTabProgressWidth
             self.notificationRingColor = config.notificationRingColor
-            self.tabUnreadStyle = config.macosTabUnreadStyle
 
             // Set corner radius based on macos-titlebar-style
             // Native, transparent, and hidden styles use 16pt radius
@@ -1590,116 +1203,6 @@ extension TerminalWindow: TabTitleEditorDelegate {
     }
 }
 
-// MARK: - Tab Active Indicator
-
-class TabActiveIndicatorLayer: CALayer {
-    let indicatorStyle: Ghostty.Config.MacTabActiveIndicator
-    private static let lineHeight: CGFloat = 2
-
-    init(indicatorStyle: Ghostty.Config.MacTabActiveIndicator) {
-        self.indicatorStyle = indicatorStyle
-        super.init()
-        masksToBounds = (indicatorStyle != .shadowLift)
-    }
-
-    override init(layer: Any) {
-        self.indicatorStyle = (layer as? TabActiveIndicatorLayer)?.indicatorStyle ?? .none
-        super.init(layer: layer)
-    }
-
-    required init?(coder: NSCoder) {
-        self.indicatorStyle = .none
-        super.init(coder: coder)
-    }
-
-    override func layoutSublayers() {
-        super.layoutSublayers()
-        rebuildLayers()
-    }
-
-    private func rebuildLayers() {
-        sublayers?.forEach { $0.removeFromSuperlayer() }
-        guard bounds.width > 0 else { return }
-
-        let accent = NSColor.controlAccentColor.cgColor
-        let h = Self.lineHeight
-
-        switch indicatorStyle {
-        case .none:
-            break
-
-        case .bottomLine:
-            addSublayer(makeLayer(accent, CGRect(x: 0, y: 0, width: bounds.width, height: h)))
-
-        case .lighterBg:
-            addSublayer(makeLayer(NSColor.white.withAlphaComponent(0.08).cgColor, bounds))
-
-        case .topLine:
-            addSublayer(makeLayer(accent, CGRect(x: 0, y: bounds.height - h, width: bounds.width, height: h)))
-
-        case .floatingCard:
-            let card = CALayer()
-            card.frame = bounds.insetBy(dx: 3, dy: 3)
-            card.backgroundColor = NSColor.white.withAlphaComponent(0.06).cgColor
-            card.borderColor = NSColor.white.withAlphaComponent(0.12).cgColor
-            card.borderWidth = 0.5
-            card.cornerRadius = 5
-            addSublayer(card)
-
-        case .backgroundTint:
-            addSublayer(makeLayer(NSColor.controlAccentColor.withAlphaComponent(0.12).cgColor, bounds))
-
-        case .tintLine:
-            addSublayer(makeLayer(NSColor.controlAccentColor.withAlphaComponent(0.12).cgColor, bounds))
-            addSublayer(makeLayer(accent, CGRect(x: 0, y: 0, width: bounds.width, height: h)))
-
-        case .innerGlow:
-            let glow = CAGradientLayer()
-            glow.type = .radial
-            glow.frame = bounds
-            glow.colors = [NSColor.white.withAlphaComponent(0.1).cgColor, NSColor.clear.cgColor]
-            glow.startPoint = CGPoint(x: 0.5, y: 0.5)
-            glow.endPoint = CGPoint(x: 1.0, y: 1.0)
-            addSublayer(glow)
-
-        case .connectedTab:
-            addSublayer(makeLayer(NSColor.windowBackgroundColor.withAlphaComponent(0.6).cgColor, bounds))
-            addSublayer(makeLayer(accent, CGRect(x: 0, y: bounds.height - h, width: bounds.width, height: h)))
-
-        case .sideFade:
-            let gradient = CAGradientLayer()
-            gradient.frame = bounds
-            gradient.colors = [
-                NSColor.white.withAlphaComponent(0).cgColor,
-                NSColor.white.withAlphaComponent(0.08).cgColor,
-                NSColor.white.withAlphaComponent(0).cgColor,
-            ]
-            gradient.startPoint = CGPoint(x: 0, y: 0.5)
-            gradient.endPoint = CGPoint(x: 1, y: 0.5)
-            addSublayer(gradient)
-
-        case .shadowLift:
-            let card = CALayer()
-            card.frame = bounds.insetBy(dx: 2, dy: 2)
-            card.backgroundColor = NSColor.white.withAlphaComponent(0.06).cgColor
-            card.cornerRadius = 4
-            card.shadowColor = NSColor.black.cgColor
-            card.shadowOpacity = 0.5
-            card.shadowRadius = 4
-            card.shadowOffset = CGSize(width: 0, height: -2)
-            card.masksToBounds = false
-            addSublayer(card)
-        }
-    }
-
-    private func makeLayer(_ color: CGColor, _ frame: CGRect) -> CALayer {
-        let l = CALayer()
-        l.backgroundColor = color
-        l.frame = frame
-        return l
-    }
-}
-
 // MARK: - Agent Icon Hover View
 
 private class BrailleSpinnerView: NSView {
@@ -1762,60 +1265,6 @@ private class BrailleSpinnerView: NSView {
         f.getRed(&fr, green: &fg, blue: &fb, alpha: &fa)
         e.getRed(&tr, green: &tg, blue: &tb, alpha: &ta)
         return NSColor(red: fr + (tr - fr) * t, green: fg + (tg - fg) * t, blue: fb + (tb - fb) * t, alpha: 1)
-    }
-}
-
-private class RainbowRingSpinnerView: NSView {
-    private let gradientLayer = CAGradientLayer()
-    private let maskLayer = CAShapeLayer()
-
-    init(size: CGFloat) {
-        super.init(frame: NSRect(x: 0, y: 0, width: size, height: size))
-        wantsLayer = true
-
-        gradientLayer.type = .conic
-        gradientLayer.colors = [
-            NSColor.systemRed.cgColor,
-            NSColor.systemYellow.cgColor,
-            NSColor.systemGreen.cgColor,
-            NSColor.systemCyan.cgColor,
-            NSColor.systemRed.cgColor,
-        ]
-        gradientLayer.locations = [0, 0.25, 0.5, 0.75, 1.0]
-        gradientLayer.startPoint = CGPoint(x: 0.5, y: 0.5)
-        gradientLayer.endPoint = CGPoint(x: 0.5, y: 0)
-
-        maskLayer.fillColor = nil
-        maskLayer.strokeColor = NSColor.white.cgColor
-        maskLayer.lineWidth = 1.5
-        maskLayer.lineCap = .round
-
-        gradientLayer.mask = maskLayer
-        layer!.addSublayer(gradientLayer)
-    }
-
-    required init?(coder: NSCoder) { fatalError() }
-
-    override func layout() {
-        super.layout()
-        gradientLayer.frame = bounds
-
-        let center = CGPoint(x: bounds.midX, y: bounds.midY)
-        let radius = min(bounds.width, bounds.height) / 2 - 1
-        let path = CGMutablePath()
-        path.addArc(center: center, radius: radius, startAngle: -.pi / 2, endAngle: .pi * 1.5, clockwise: false)
-        maskLayer.path = path
-        maskLayer.frame = bounds
-
-        if gradientLayer.animation(forKey: "spin") == nil {
-            let spin = CABasicAnimation(keyPath: "transform.rotation.z")
-            spin.fromValue = 0
-            spin.toValue = 2 * Double.pi
-            spin.duration = 1.5
-            spin.repeatCount = .infinity
-            spin.timingFunction = CAMediaTimingFunction(name: .linear)
-            gradientLayer.add(spin, forKey: "spin")
-        }
     }
 }
 

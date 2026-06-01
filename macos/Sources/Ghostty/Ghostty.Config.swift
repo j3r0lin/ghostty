@@ -423,16 +423,6 @@ extension Ghostty {
             return MacOSTitlebarProxyIcon(rawValue: str) ?? defaultValue
         }
 
-        var macosTabActiveIndicator: MacTabActiveIndicator {
-            let defaultValue = MacTabActiveIndicator.none
-            guard let config = self.config else { return defaultValue }
-            var v: UnsafePointer<Int8>?
-            let key = "macos-tab-active-indicator"
-            guard ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8))) else { return defaultValue }
-            guard let ptr = v else { return defaultValue }
-            return MacTabActiveIndicator(rawValue: String(cString: ptr)) ?? defaultValue
-        }
-
         var surfaceProgressStyle: SurfaceProgressStyle {
             let defaultValue = SurfaceProgressStyle.pulse
             guard let config = self.config else { return defaultValue }
@@ -441,34 +431,6 @@ extension Ghostty {
             guard ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8))) else { return defaultValue }
             guard let ptr = v else { return defaultValue }
             return SurfaceProgressStyle(rawValue: String(cString: ptr)) ?? defaultValue
-        }
-
-        var macosTabProgressStyle: MacTabProgressStyle {
-            let defaultValue = MacTabProgressStyle.pulse
-            guard let config = self.config else { return defaultValue }
-            var v: UnsafePointer<Int8>?
-            let key = "macos-tab-progress-style"
-            guard ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8))) else { return defaultValue }
-            guard let ptr = v else { return defaultValue }
-            return MacTabProgressStyle(rawValue: String(cString: ptr)) ?? defaultValue
-        }
-
-        var macosTabProgressWidth: CGFloat {
-            guard let config = self.config else { return 2 }
-            var v: UInt8 = 2
-            let key = "macos-tab-progress-width"
-            _ = ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8)))
-            return CGFloat(v)
-        }
-
-        var macosTabUnreadStyle: MacTabUnreadStyle {
-            let defaultValue = MacTabUnreadStyle.highlight
-            guard let config = self.config else { return defaultValue }
-            var v: UnsafePointer<Int8>?
-            let key = "macos-tab-unread-style"
-            guard ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8))) else { return defaultValue }
-            guard let ptr = v else { return defaultValue }
-            return MacTabUnreadStyle(rawValue: String(cString: ptr)) ?? defaultValue
         }
 
         var macosDockDropBehavior: MacDockDropBehavior {
@@ -1034,13 +996,6 @@ extension Ghostty.Config {
         case rounded
     }
 
-    enum MacTabUnreadStyle: String {
-        case badge
-        case blink
-        case highlight
-        case off
-    }
-
     struct NotifyOnCommandFinishAction: OptionSet {
         let rawValue: CUnsignedInt
 
@@ -1061,33 +1016,4 @@ extension Ghostty.Config {
         case gradientSweepOcean = "gradient-sweep-ocean"
     }
 
-    enum MacTabProgressStyle: String {
-        case pulse
-        case pulseTop = "pulse-top"
-        case pulseAll = "pulse-all"
-        case pulseDot = "pulse-dot"
-        case bounceTop = "bounce-top"
-        case bounceBottom = "bounce-bottom"
-        case gradientSweepRainbow = "gradient-sweep-rainbow"
-        case gradientSweepSunset = "gradient-sweep-sunset"
-        case gradientSweepNeon = "gradient-sweep-neon"
-        case gradientSweepOcean = "gradient-sweep-ocean"
-        case gradientRing = "gradient-ring"
-        case brailleGradient = "braille-gradient"
-        case glow
-    }
-
-    enum MacTabActiveIndicator: String {
-        case none
-        case bottomLine = "bottom-line"
-        case lighterBg = "lighter-bg"
-        case topLine = "top-line"
-        case floatingCard = "floating-card"
-        case backgroundTint = "background-tint"
-        case tintLine = "tint-line"
-        case innerGlow = "inner-glow"
-        case connectedTab = "connected-tab"
-        case sideFade = "side-fade"
-        case shadowLift = "shadow-lift"
-    }
 }
