@@ -1803,6 +1803,12 @@ extension Ghostty {
             let id = notification.request.identifier
             guard self.notificationIdentifiers.remove(id) != nil else { return }
             if focus {
+                // The app is usually in the background when a system
+                // notification is clicked. Activate first so AppKit's own
+                // "restore last key window" pass doesn't override the tab we
+                // bring forward below (otherwise we land on the previously
+                // active tab instead of the notification's source tab).
+                NSApp.activate(ignoringOtherApps: true)
                 self.window?.makeKeyAndOrderFront(self)
                 Ghostty.moveFocus(to: self)
             }
