@@ -92,10 +92,7 @@ class TerminalWindow: NSWindow {
     }
 
     func updateTabUnreadVisibility() {
-        // Unread dot is kept regardless of active state; the shortcut label it
-        // replaced stays hidden while there's an unread indicator.
-        unreadDotView?.isHidden = false
-        unreadDotHiddenShortcutLabel?.isHidden = true
+        unreadBarView?.isHidden = false
     }
 
     /// The detected CLI agent for this window's tab icon.
@@ -108,14 +105,14 @@ class TerminalWindow: NSWindow {
 
 
     /// Whether this window's tab should show the unread notification indicator
-    /// (blinking accent-colored dot replacing the shortcut label).
+    /// (blinking accent-colored bar at the top of the tab).
     var tabHasUnread: Bool = false {
         didSet {
             guard tabHasUnread != oldValue else { return }
             if tabHasUnread {
-                attachUnreadDot(animated: true)
+                attachUnreadBar(animated: true)
             } else {
-                removeUnreadDot()
+                removeUnreadBar()
             }
         }
     }
@@ -124,28 +121,25 @@ class TerminalWindow: NSWindow {
         return NSColor.controlAccentColor
     }
 
-    private func findShortcutLabel(in tabButton: NSView) -> NSView? {
-        let textFields = tabButton.descendants(withClassName: "NSTextField")
-        guard textFields.count >= 2 else { return nil }
-        return textFields.max(by: { $0.frame.origin.x < $1.frame.origin.x })
-    }
+    private var unreadBarView: NSView?
 
-    private func makeTrailingDot(color: NSColor, size: CGFloat, in tabButton: NSView, animated: Bool = false) -> NSView {
-        let dotLayer = CALayer()
-        dotLayer.backgroundColor = color.cgColor
-        dotLayer.cornerRadius = size / 2
-        dotLayer.masksToBounds = true
-        let dot = NSView()
-        dot.wantsLayer = true
-        dot.layer = dotLayer
-        dot.translatesAutoresizingMaskIntoConstraints = false
-        tabButton.addSubview(dot)
+    private func attachUnreadBar(animated: Bool = false) {
+        guard unreadBarView == nil, let tabButton = findOwnTabButton() else { return }
+
+        let barLayer = CALayer()
+        barLayer.backgroundColor = unreadAccentColor.cgColor
+        let bar = NSView()
+        bar.wantsLayer = true
+        bar.layer = barLayer
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        tabButton.addSubview(bar)
         NSLayoutConstraint.activate([
-            dot.trailingAnchor.constraint(equalTo: tabButton.trailingAnchor, constant: -10),
-            dot.centerYAnchor.constraint(equalTo: tabButton.centerYAnchor),
-            dot.widthAnchor.constraint(equalToConstant: size),
-            dot.heightAnchor.constraint(equalToConstant: size),
+            bar.topAnchor.constraint(equalTo: tabButton.topAnchor),
+            bar.leadingAnchor.constraint(equalTo: tabButton.leadingAnchor),
+            bar.trailingAnchor.constraint(equalTo: tabButton.trailingAnchor),
+            bar.heightAnchor.constraint(equalToConstant: 2),
         ])
+
         if animated {
             let blink = CAKeyframeAnimation(keyPath: "opacity")
             blink.values = [1.0, 0.0, 1.0]
@@ -153,36 +147,21 @@ class TerminalWindow: NSWindow {
             blink.calculationMode = .discrete
             blink.duration = 1.0
             blink.repeatCount = .infinity
-            dotLayer.add(blink, forKey: "blink")
+            barLayer.add(blink, forKey: "blink")
         }
-        return dot
+        unreadBarView = bar
     }
 
-    private var unreadDotView: NSView?
-    private weak var unreadDotHiddenShortcutLabel: NSView?
-
-    private func attachUnreadDot(animated: Bool = false) {
-        guard unreadDotView == nil, let tabButton = findOwnTabButton() else { return }
-
-        if let shortcutLabel = findShortcutLabel(in: tabButton) {
-            shortcutLabel.isHidden = true
-            unreadDotHiddenShortcutLabel = shortcutLabel
-        }
-        unreadDotView = makeTrailingDot(color: unreadAccentColor, size: 9, in: tabButton, animated: animated)
-    }
-
-    private func removeUnreadDot() {
-        unreadDotView?.removeFromSuperview()
-        unreadDotView = nil
-        unreadDotHiddenShortcutLabel?.isHidden = false
-        unreadDotHiddenShortcutLabel = nil
+    private func removeUnreadBar() {
+        unreadBarView?.removeFromSuperview()
+        unreadBarView = nil
     }
 
     func reattachTabUnreadTintIfNeeded() {
         guard tabHasUnread else { return }
-        if unreadDotView?.superview == nil {
-            removeUnreadDot()
-            attachUnreadDot(animated: true)
+        if unreadBarView?.superview == nil {
+            removeUnreadBar()
+            attachUnreadBar(animated: true)
         }
     }
 
