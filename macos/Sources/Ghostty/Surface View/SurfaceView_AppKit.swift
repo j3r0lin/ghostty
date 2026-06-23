@@ -1723,7 +1723,10 @@ extension Ghostty {
         ///     the agent's brand icon on the left.
         ///   - Else (user is in another app) show a system notification so it
         ///     reaches them through the OS notification UI.
-        func showUserNotification(title: String, body: String, requireFocus: Bool = true) {
+        func showUserNotification(title: String, body: String, agent: CLIAgent? = nil, requireFocus: Bool = true) {
+            // 优先用 OSC 777 payload 里携带的 agent,detector 缓存作 fallback。
+            // 通知发送是同步动作,detectedAgent 的 title-timer 异步刷新可能 stale。
+            let effectiveAgent = agent ?? self.detectedAgent
             let ghosttyActive = NSApp.isActive
             let surfaceVisible =
                 self.focused && (self.window?.isKeyWindow ?? false) && ghosttyActive
@@ -1754,7 +1757,7 @@ extension Ghostty {
                     title: title,
                     subtitle: cwdSubtitle,
                     body: body,
-                    agent: detectedAgent,
+                    agent: effectiveAgent,
                     surfaceID: self.id
                 )
                 NotificationToastManager.shared.show(toast)
@@ -1777,7 +1780,7 @@ extension Ghostty {
                         "surface": self.id.uuidString,
                         "requireFocus": requireFocus,
                     ]
-                    if let attachment = self.detectedAgent?.notificationAttachment() {
+                    if let attachment = effectiveAgent?.notificationAttachment() {
                         content.attachments = [attachment]
                     }
 

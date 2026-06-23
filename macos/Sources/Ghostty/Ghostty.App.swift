@@ -1431,7 +1431,10 @@ extension Ghostty {
                 let resolvedTitle = title == ClaudeCodeSession.defaultTitle
                     ? (ClaudeCodeSession.cachedTitle(forTerminalID: surfaceView.id.uuidString) ?? title)
                     : title
-                showDesktopNotification(surfaceView, title: resolvedTitle, body: body)
+                // OSC 777 payload 自带 agent 字段时,从字节流恢复枚举;空串视为缺省。
+                let agentStr = String(cString: n.agent!, encoding: .utf8) ?? ""
+                let agent = agentStr.isEmpty ? nil : CLIAgent(rawValue: agentStr)
+                showDesktopNotification(surfaceView, title: resolvedTitle, body: body, agent: agent)
 
             default:
                 assertionFailure()
@@ -1442,6 +1445,7 @@ extension Ghostty {
             _ surfaceView: SurfaceView,
             title: String,
             body: String,
+            agent: CLIAgent? = nil,
             requireFocus: Bool = true) {
             // Tab indicator and in-app toast don't require notification
             // authorization — dispatch them immediately on the main thread.
@@ -1449,6 +1453,7 @@ extension Ghostty {
                 surfaceView.showUserNotification(
                     title: title,
                     body: body,
+                    agent: agent,
                     requireFocus: requireFocus
                 )
             }
