@@ -1804,7 +1804,10 @@ extension Ghostty {
         /// Handle a user notification click
         func handleUserNotification(notification: UNNotification, focus: Bool) {
             let id = notification.request.identifier
-            guard self.notificationIdentifiers.remove(id) != nil else { return }
+            // 当作清理动作:有就移掉,没有也不影响跳转。
+            // 不能用作 gate —— set 是纯内存,Ghostty 重启后会空,
+            // 但系统通知中心持久化,旧通知点击会找不到 id。
+            self.notificationIdentifiers.remove(id)
             if focus {
                 NSApp.activate(ignoringOtherApps: true)
                 // Dispatch so AppKit's activation "restore last key window"
