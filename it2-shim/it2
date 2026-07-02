@@ -263,7 +263,7 @@ def cmd_session_close(args):
 tell application "Ghostty"
   close (first terminal whose id is "{args.session}")
 end tell'''
-    run_applescript(script)
+    _run_and_check(script)
 
 
 
