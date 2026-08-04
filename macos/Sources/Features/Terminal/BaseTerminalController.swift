@@ -825,6 +825,9 @@ class BaseTerminalController: NSWindowController,
                 .map { [weak self] (title: String, bell: Bool, pwd: String?) -> String in
                     self?.computeTitle(title: title, bell: bell, pwd: pwd) ?? ""
                 }
+                // Terminal programs re-send the same title constantly. Assigning an
+                // unchanged NSWindow.title still dirties the titlebar and the tab.
+                .removeDuplicates()
                 .sink { [weak self] newTitle in self?.titleDidChange(to: newTitle) }
                 .store(in: &focusedSurfaceCancellables)
 
