@@ -95,7 +95,7 @@ class TerminalWindow: NSWindow {
     }
 
     func updateTabUnreadVisibility() {
-        unreadBarView?.isHidden = false
+        unreadBarLayer?.isHidden = false
     }
 
     /// The detected CLI agent for this window's tab icon.
@@ -124,24 +124,34 @@ class TerminalWindow: NSWindow {
         return NSColor.controlAccentColor
     }
 
-    private var unreadBarView: NSView?
+    /// A plain sublayer rather than a subview: a view pinned with constraints makes
+    /// every blink a reason for the titlebar to re-run Auto Layout. This follows the
+    /// same pattern as tabActiveIndicatorLayer and progressGlowLayer.
+    private var unreadBarLayer: CALayer?
+
+    private static let unreadBarHeight: CGFloat = 2
 
     private func attachUnreadBar(animated: Bool = false) {
-        guard unreadBarView == nil, let tabButton = findOwnTabButton() else { return }
+        guard unreadBarLayer == nil, let tabButton = findOwnTabButton() else { return }
+        tabButton.wantsLayer = true
+        guard let parent = tabButton.layer else { return }
 
-        let barLayer = CALayer()
-        barLayer.backgroundColor = unreadAccentColor.cgColor
-        let bar = NSView()
-        bar.wantsLayer = true
-        bar.layer = barLayer
-        bar.translatesAutoresizingMaskIntoConstraints = false
-        tabButton.addSubview(bar)
-        NSLayoutConstraint.activate([
-            bar.topAnchor.constraint(equalTo: tabButton.topAnchor),
-            bar.leadingAnchor.constraint(equalTo: tabButton.leadingAnchor),
-            bar.trailingAnchor.constraint(equalTo: tabButton.trailingAnchor),
-            bar.heightAnchor.constraint(equalToConstant: 2),
-        ])
+        let bar = CALayer()
+        bar.backgroundColor = unreadAccentColor.cgColor
+
+        // The bar sits along the top edge. Which y that is depends on the tab
+        // button's geometry, and the resize mask has to pin the same edge.
+        let height = Self.unreadBarHeight
+        if tabButton.isFlipped {
+            bar.frame = CGRect(x: 0, y: 0, width: tabButton.bounds.width, height: height)
+            bar.autoresizingMask = [.layerWidthSizable, .layerMaxYMargin]
+        } else {
+            bar.frame = CGRect(
+                x: 0, y: tabButton.bounds.height - height,
+                width: tabButton.bounds.width, height: height)
+            bar.autoresizingMask = [.layerWidthSizable, .layerMinYMargin]
+        }
+        parent.addSublayer(bar)
 
         if animated {
             let blink = CAKeyframeAnimation(keyPath: "opacity")
@@ -150,19 +160,19 @@ class TerminalWindow: NSWindow {
             blink.calculationMode = .discrete
             blink.duration = 1.0
             blink.repeatCount = .infinity
-            barLayer.add(blink, forKey: "blink")
+            bar.add(blink, forKey: "blink")
         }
-        unreadBarView = bar
+        unreadBarLayer = bar
     }
 
     private func removeUnreadBar() {
-        unreadBarView?.removeFromSuperview()
-        unreadBarView = nil
+        unreadBarLayer?.removeFromSuperlayer()
+        unreadBarLayer = nil
     }
 
     func reattachTabUnreadTintIfNeeded() {
         guard tabHasUnread else { return }
-        if unreadBarView?.superview == nil {
+        if unreadBarLayer?.superlayer == nil {
             removeUnreadBar()
             attachUnreadBar(animated: true)
         }
