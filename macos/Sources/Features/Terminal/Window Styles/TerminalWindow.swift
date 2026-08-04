@@ -40,6 +40,9 @@ class TerminalWindow: NSWindow {
     /// Observes config reload so we can refresh derived state (e.g. tab active indicator style).
     private var configChangeObserver: NSObjectProtocol?
 
+    /// Observes occlusion so decorative animations stop when the window can't be seen.
+    private var occlusionObserver: NSObjectProtocol?
+
     /// Handles inline tab title editing for this host window.
     private(set) lazy var tabTitleEditor = TabTitleEditor(
         hostWindow: self,
@@ -414,6 +417,18 @@ class TerminalWindow: NSWindow {
             ] as? Ghostty.Config else { return }
 
             self.derivedConfig = DerivedConfig(config)
+        }
+
+        // Stop the spinner only when the whole app is off screen. Per-window
+        // occlusion is the wrong signal here: a background tab's window isn't
+        // visible even though its tab button is.
+        occlusionObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeOcclusionStateNotification,
+            object: NSApp,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.brailleSpinnerView?.setSuspended(!NSApp.occlusionState.contains(.visible))
         }
 
         // This is required so that window restoration properly creates our tabs
@@ -910,6 +925,9 @@ class TerminalWindow: NSWindow {
         if let observer = configChangeObserver {
             NotificationCenter.default.removeObserver(observer)
         }
+        if let observer = occlusionObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     // MARK: Config
@@ -1180,57 +1198,152 @@ extension TerminalWindow: TabTitleEditorDelegate {
 
 // MARK: - Agent Icon Hover View
 
+/// The braille frames are pre-rasterized once and handed to Core Animation as a
+/// discrete keyframe animation on `contents`. Nothing runs on the main thread while
+/// the spinner spins: no timer fires, no view text changes, and nothing invalidates
+/// the tab button's layout. The view's size is fixed for the lifetime of the view so
+/// that Auto Layout never has to reconsider the titlebar because of the spinner.
 private class BrailleSpinnerView: NSView {
-    private let label: NSTextField
-    private var timer: Timer?
-    private var frameIndex = 0
-
     private static let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
     private static let startColor = NSColor.systemCyan
     private static let endColor = NSColor.systemPurple
+    private static let frameDuration: CFTimeInterval = 0.08
+    private static let animationKey = "brailleSpin"
+
+    private let fontSize: CGFloat
+    private let boxSize: NSSize
+
+    /// Whether the spinner should be spinning. Independent of whether the animation
+    /// is currently installed, which also depends on the window being visible.
+    private var wantsAnimation = false
 
     init(fontSize: CGFloat) {
-        label = NSTextField(labelWithString: Self.frames[0])
-        super.init(frame: .zero)
-        label.font = .monospacedSystemFont(ofSize: fontSize, weight: .medium)
-        label.textColor = Self.startColor
-        label.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(label)
-        NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: leadingAnchor),
-            label.trailingAnchor.constraint(equalTo: trailingAnchor),
-            label.topAnchor.constraint(equalTo: topAnchor),
-            label.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ])
+        self.fontSize = fontSize
+
+        // Size to the widest frame so the box never changes size. All ten braille
+        // frames are the same width in a monospaced font, but measure anyway rather
+        // than depend on that.
+        let font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .medium)
+        let measured = Self.frames.map { ($0 as NSString).size(withAttributes: [.font: font]) }
+        self.boxSize = NSSize(
+            width: ceil(measured.map(\.width).max() ?? fontSize),
+            height: ceil(measured.map(\.height).max() ?? fontSize))
+
+        super.init(frame: NSRect(origin: .zero, size: boxSize))
+        wantsLayer = true
+        layer?.contentsGravity = .center
         startAnimating()
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
+    /// Constant: the spinner never asks the titlebar to re-layout.
+    override var intrinsicContentSize: NSSize { boxSize }
+
     override func viewDidMoveToSuperview() {
         super.viewDidMoveToSuperview()
-        // Stop the runloop timer if NSTabBar's private machinery detaches
-        // us without going through removeBrailleSpinner; otherwise the
-        // timer keeps firing on a detached view and the view never deinits.
-        if superview == nil { stopAnimating() }
-    }
-
-    private func startAnimating() {
-        timer = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            self.frameIndex = (self.frameIndex + 1) % Self.frames.count
-            self.label.stringValue = Self.frames[self.frameIndex]
-            let t = CGFloat(self.frameIndex) / CGFloat(Self.frames.count)
-            self.label.textColor = Self.interpolateColor(t: t)
+        // NSTabBar's private machinery can detach us without going through
+        // removeBrailleSpinner. Drop the animation so we aren't animating a
+        // detached layer.
+        if superview == nil {
+            layer?.removeAnimation(forKey: Self.animationKey)
+        } else {
+            syncAnimation()
         }
     }
 
-    func stopAnimating() {
-        timer?.invalidate()
-        timer = nil
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // The frames are rasterized for a specific backing scale, which we only
+        // know once we have a window.
+        syncAnimation()
     }
 
-    deinit { timer?.invalidate() }
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        syncAnimation()
+    }
+
+    func startAnimating() {
+        wantsAnimation = true
+        syncAnimation()
+    }
+
+    func stopAnimating() {
+        wantsAnimation = false
+        layer?.removeAnimation(forKey: Self.animationKey)
+    }
+
+    /// Suspend only while no window of the app is on screen at all. Deliberately
+    /// app-wide rather than per-window: with native tabs each tab is its own
+    /// NSWindow and a background tab's window is not "visible", but its tab button
+    /// in the shared tab bar is — freezing that spinner would defeat the point of
+    /// showing which background tab is busy.
+    func setSuspended(_ suspended: Bool) {
+        if suspended {
+            layer?.removeAnimation(forKey: Self.animationKey)
+        } else {
+            syncAnimation()
+        }
+    }
+
+    private func syncAnimation() {
+        guard wantsAnimation, let layer, superview != nil, let window else { return }
+        // App-wide, not window-wide: see setSuspended.
+        guard NSApp.occlusionState.contains(.visible) else { return }
+
+        let scale = window.backingScaleFactor
+        let images = Self.frames.enumerated().compactMap { i, glyph in
+            rasterize(glyph,
+                      color: Self.interpolateColor(t: CGFloat(i) / CGFloat(Self.frames.count)),
+                      scale: scale)
+        }
+        guard !images.isEmpty else { return }
+
+        layer.contentsScale = scale
+        layer.contents = images[0]
+
+        let anim = CAKeyframeAnimation(keyPath: "contents")
+        anim.values = images
+        anim.calculationMode = .discrete
+        anim.duration = Self.frameDuration * Double(Self.frames.count)
+        anim.repeatCount = .infinity
+        anim.isRemovedOnCompletion = false
+
+        layer.removeAnimation(forKey: Self.animationKey)
+        layer.add(anim, forKey: Self.animationKey)
+    }
+
+    private func rasterize(_ glyph: String, color: NSColor, scale: CGFloat) -> CGImage? {
+        let pixelWidth = Int((boxSize.width * scale).rounded(.up))
+        let pixelHeight = Int((boxSize.height * scale).rounded(.up))
+        guard pixelWidth > 0, pixelHeight > 0,
+              let ctx = CGContext(
+                data: nil,
+                width: pixelWidth,
+                height: pixelHeight,
+                bitsPerComponent: 8,
+                bytesPerRow: 0,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
+                    | CGBitmapInfo.byteOrder32Little.rawValue)
+        else { return nil }
+
+        ctx.scaleBy(x: scale, y: scale)
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)
+        let str = NSAttributedString(string: glyph, attributes: [
+            .font: NSFont.monospacedSystemFont(ofSize: fontSize, weight: .medium),
+            .foregroundColor: color,
+        ])
+        let drawn = str.size()
+        str.draw(at: NSPoint(x: (boxSize.width - drawn.width) / 2,
+                             y: (boxSize.height - drawn.height) / 2))
+        NSGraphicsContext.restoreGraphicsState()
+
+        return ctx.makeImage()
+    }
 
     private static func interpolateColor(t: CGFloat) -> NSColor {
         guard let f = startColor.usingColorSpace(.sRGB),
