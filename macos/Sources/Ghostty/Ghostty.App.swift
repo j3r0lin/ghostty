@@ -43,18 +43,6 @@ extension Ghostty {
         /// A surface appears at most once (re-notification moves it to the end).
         @Published var unreadNotificationSurfaceIDs: [UUID] = []
 
-        /// UUID of the surface that emitted the most recent desktop notification.
-        var lastNotificationSurfaceID: UUID? {
-            get { unreadNotificationSurfaceIDs.last }
-            set {
-                if let id = newValue {
-                    appendUnreadNotification(surfaceID: id)
-                } else {
-                    // Setting to nil is only used by legacy paths; no-op the queue.
-                }
-            }
-        }
-
         /// True if we need to confirm before quitting.
         var needsConfirmQuit: Bool {
             guard let app = app else { return false }
