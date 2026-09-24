@@ -285,11 +285,25 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
         return safe ? s : "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
+    static let restoreFileDirectory = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".claude/ghostty", isDirectory: true)
+
     private static func writeRestoreFile(_ command: String, forSurfaceID id: UUID) {
-        let dir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claude/ghostty", isDirectory: true)
-        let file = dir.appendingPathComponent("\(id.uuidString).restore")
+        let file = restoreFileDirectory.appendingPathComponent("\(id.uuidString).restore")
         try? command.write(to: file, atomically: true, encoding: .utf8)
+    }
+
+    /// Deletes restore files left by a previous launch. Only the zsh shell
+    /// integration consumes them, so they outlive other shells and tabs closed
+    /// before the shell starts. Surface IDs survive restoration, so a leftover
+    /// file would resume a stale session the next time that surface starts zsh.
+    static func removeRestoreFiles(in dir: URL = restoreFileDirectory) {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: nil
+        ) else { return }
+        for file in files where file.pathExtension == "restore" {
+            try? FileManager.default.removeItem(at: file)
+        }
     }
 
     /// This restores the focus state of the surfaceview within the given window. When restoring,

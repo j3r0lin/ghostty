@@ -213,6 +213,11 @@ class AppDelegate: NSObject,
             // Manual autofill via the `Edit => AutoFill` menu item still work as expected.
             "NSAutoFillHeuristicControllerEnabled": false,
         ])
+
+        // AppKit restores windows between willFinishLaunching and
+        // didFinishLaunching. Running this any later would delete the files
+        // this launch's restoration just wrote.
+        TerminalWindowRestoration.removeRestoreFiles()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
