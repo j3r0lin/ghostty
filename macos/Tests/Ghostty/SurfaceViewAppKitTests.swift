@@ -1,3 +1,4 @@
+import AppKit
 @testable import Ghostty
 import Testing
 
@@ -68,5 +69,34 @@ struct SurfaceViewAppKitTests {
         var owner = Ghostty.SurfaceView.ProgressOwner()
         owner.record(reporting: true, foreground: nil)
         #expect(!owner.isStale(foreground: 42))
+    }
+
+    @MainActor
+    @Test func bringTabToFrontSelectsTheWindowsTab() throws {
+        func makeWindow() -> NSWindow {
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 200, height: 200),
+                styleMask: [.titled, .closable],
+                backing: .buffered,
+                defer: false)
+            window.isReleasedWhenClosed = false
+            window.tabbingMode = .preferred
+            return window
+        }
+        let front = makeWindow()
+        let back = makeWindow()
+        defer {
+            back.close()
+            front.close()
+        }
+        front.orderFront(nil)
+        front.addTabbedWindow(back, ordered: .above)
+        let tabGroup = try #require(front.tabGroup)
+        tabGroup.selectedWindow = front
+        try #require(tabGroup.selectedWindow === front)
+
+        Ghostty.SurfaceView.bringTabToFront(back)
+
+        #expect(tabGroup.selectedWindow === back)
     }
 }

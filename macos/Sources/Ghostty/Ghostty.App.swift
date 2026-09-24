@@ -2519,9 +2519,7 @@ extension Ghostty {
             while let uuid = unreadNotificationSurfaceIDs.last {
                 unreadNotificationSurfaceIDs.removeLast()
                 if let surface = delegate?.findSurface(forUUID: uuid) {
-                    surface.window?.makeKeyAndOrderFront(nil)
-                    NSApp.activate(ignoringOtherApps: true)
-                    Ghostty.moveFocus(to: surface)
+                    surface.focusFromNotification()
                     return true
                 }
             }

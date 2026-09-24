@@ -1926,19 +1926,30 @@ extension Ghostty {
             // 但系统通知中心持久化,旧通知点击会找不到 id。
             self.notificationIdentifiers.remove(id)
             if focus {
-                NSApp.activate(ignoringOtherApps: true)
-                // Dispatch so AppKit's activation "restore last key window"
-                // pass finishes before we select the notification's tab.
-                DispatchQueue.main.async {
-                    if let window = self.window {
-                        if let tabGroup = window.tabGroup, tabGroup.selectedWindow !== window {
-                            tabGroup.selectedWindow = window
-                        }
-                        window.makeKeyAndOrderFront(nil)
-                    }
-                    Ghostty.moveFocus(to: self)
-                }
+                focusFromNotification()
             }
+        }
+
+        /// Activates the app and brings this surface's tab to the front; safe
+        /// to call while Ghostty is in the background.
+        func focusFromNotification() {
+            NSApp.activate(ignoringOtherApps: true)
+            // Dispatch so AppKit's activation "restore last key window"
+            // pass finishes before we select the notification's tab.
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                if let window = self.window {
+                    Self.bringTabToFront(window)
+                }
+                Ghostty.moveFocus(to: self)
+            }
+        }
+
+        static func bringTabToFront(_ window: NSWindow) {
+            if let tabGroup = window.tabGroup, tabGroup.selectedWindow !== window {
+                tabGroup.selectedWindow = window
+            }
+            window.makeKeyAndOrderFront(nil)
         }
 
         struct DerivedConfig {

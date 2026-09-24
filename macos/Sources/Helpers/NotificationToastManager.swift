@@ -189,9 +189,7 @@ final class NotificationToastManager {
         let surfaceID = entry.toast.surfaceID
 
         if let lookup = surfaceLookup, let surface = lookup(surfaceID) {
-            surface.window?.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-            Ghostty.moveFocus(to: surface)
+            surface.focusFromNotification()
         } else {
             Self.logger.warning("toast click: could not find surface for \(surfaceID)")
         }
