@@ -35,60 +35,29 @@ pub fn parse(parser: *Parser, _: ?u8) ?*Command {
     data[t] = 0;
     const title = data[k + 1 .. t :0];
 
-    // Find where the body ends and optional key=value pairs begin.
-    // The body is the third semicolon-delimited field; everything after
-    // the next semicolon (if any) is treated as key=value pairs.
-    var body_end: usize = data.len - 1;
-    var kv_start: ?usize = null;
-    if (std.mem.indexOfScalarPos(u8, data, t + 1, ';')) |semi| {
-        body_end = semi;
-        data[semi] = 0;
-        kv_start = semi + 1;
-    }
-    const body = data[t + 1 .. body_end :0];
-
-    // Parse optional ;key=value pairs. We null-terminate each pair
-    // in-place by overwriting the ';' separator (or relying on the
-    // trailing sentinel for the last pair) so we can produce [:0] slices.
+    // The body may itself contain ';', so only trailing `;agent=...` and
+    // `;state=...` fields are split off. Anything else keeps the body intact,
+    // matching plain OSC 777 behavior.
+    const rest = data[t + 1 .. data.len - 1];
+    var body_end = rest.len;
     var agent: ?[:0]const u8 = null;
     var state: ?[:0]const u8 = null;
-    if (kv_start) |start| {
-        // The region from kv_start to data.len-1 contains key=value
-        // pairs separated by ';', followed by the trailing sentinel
-        // byte at data[data.len-1] which is already 0.
-        const kv_region = data[start .. data.len - 1];
-        // Null-terminate each pair by replacing ';' with 0.
-        for (kv_region) |*byte| {
-            if (byte.* == ';') byte.* = 0;
-        }
-        // Now iterate over null-terminated segments.
-        var pos: usize = 0;
-        while (pos < kv_region.len) {
-            const seg_start = pos;
-            // Find the end of this segment (next 0 byte).
-            while (pos < kv_region.len and kv_region[pos] != 0) : (pos += 1) {}
-            const seg = kv_region[seg_start..pos];
-            // Skip the null terminator.
-            if (pos < kv_region.len) pos += 1;
-
-            if (seg.len == 0) continue;
-
-            if (std.mem.indexOfScalar(u8, seg, '=')) |eq| {
-                const key = seg[0..eq];
-                // The value runs from eq+1 to seg.len, and is
-                // null-terminated at seg.ptr[seg.len] (the 0 byte
-                // we wrote above, or the original trailing sentinel).
-                const value: [:0]const u8 = data[start + seg_start + eq + 1 .. start + seg_start + seg.len :0];
-
-                if (std.mem.eql(u8, key, "agent")) {
-                    agent = value;
-                } else if (std.mem.eql(u8, key, "state")) {
-                    state = value;
-                }
-                // Unknown keys are silently ignored for forward compatibility.
-            }
-        }
+    while (std.mem.lastIndexOfScalar(u8, rest[0..body_end], ';')) |semi| {
+        const field = rest[semi + 1 .. body_end];
+        const eq = std.mem.indexOfScalar(u8, field, '=') orelse break;
+        const key = field[0..eq];
+        // data[t + 1 + body_end] is already 0: the trailing sentinel on the
+        // first pass, the ';' overwritten below on later passes.
+        const value = data[t + 1 + semi + 1 + eq + 1 .. t + 1 + body_end :0];
+        if (std.mem.eql(u8, key, "agent")) {
+            if (agent == null) agent = value;
+        } else if (std.mem.eql(u8, key, "state")) {
+            if (state == null) state = value;
+        } else break;
+        data[t + 1 + semi] = 0;
+        body_end = semi;
     }
+    const body = data[t + 1 .. t + 1 + body_end :0];
 
     parser.command = .{
         .show_desktop_notification = .{
@@ -149,18 +118,47 @@ test "OSC: OSC 777 show desktop notification with only agent" {
     try testing.expect(cmd.show_desktop_notification.state == null);
 }
 
-test "OSC: OSC 777 show desktop notification with unknown keys ignored" {
+test "OSC: OSC 777 show desktop notification body keeps semicolons" {
     const testing = std.testing;
 
     var p: Parser = .init(null);
 
-    const input = "777;notify;Title;Body;foo=bar;agent=gemini;baz=qux";
+    const input = "777;notify;Build;done; 3 warnings";
     for (input) |ch| p.next(ch);
 
     const cmd = p.end('\x1b').?.*;
     try testing.expect(cmd == .show_desktop_notification);
-    try testing.expectEqualStrings(cmd.show_desktop_notification.title, "Title");
-    try testing.expectEqualStrings(cmd.show_desktop_notification.body, "Body");
-    try testing.expectEqualStrings(cmd.show_desktop_notification.agent.?, "gemini");
+    try testing.expectEqualStrings(cmd.show_desktop_notification.title, "Build");
+    try testing.expectEqualStrings(cmd.show_desktop_notification.body, "done; 3 warnings");
+    try testing.expect(cmd.show_desktop_notification.agent == null);
     try testing.expect(cmd.show_desktop_notification.state == null);
+}
+
+test "OSC: OSC 777 show desktop notification body with semicolons and agent" {
+    const testing = std.testing;
+
+    var p: Parser = .init(null);
+
+    const input = "777;notify;Title;a;b=c;d;agent=claude";
+    for (input) |ch| p.next(ch);
+
+    const cmd = p.end('\x1b').?.*;
+    try testing.expect(cmd == .show_desktop_notification);
+    try testing.expectEqualStrings(cmd.show_desktop_notification.body, "a;b=c;d");
+    try testing.expectEqualStrings(cmd.show_desktop_notification.agent.?, "claude");
+    try testing.expect(cmd.show_desktop_notification.state == null);
+}
+
+test "OSC: OSC 777 show desktop notification unknown trailing key stays in body" {
+    const testing = std.testing;
+
+    var p: Parser = .init(null);
+
+    const input = "777;notify;Title;Body;url=https://x?a=b";
+    for (input) |ch| p.next(ch);
+
+    const cmd = p.end('\x1b').?.*;
+    try testing.expect(cmd == .show_desktop_notification);
+    try testing.expectEqualStrings(cmd.show_desktop_notification.body, "Body;url=https://x?a=b");
+    try testing.expect(cmd.show_desktop_notification.agent == null);
 }
