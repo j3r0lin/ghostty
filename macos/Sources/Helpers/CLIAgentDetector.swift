@@ -310,42 +310,28 @@ enum CLIAgentDetector {
         return Int32(info.pbi_ppid)
     }
 
-    private static func childPIDs(of parentPID: Int32) -> [Int32] {
-        // Snapshot all PIDs and filter by ppid. Sizing is racy: between the
-        // probe call and the read call new processes can appear. We retry
-        // with a doubled buffer until proc_listpids fits comfortably (returns
-        // strictly less than the buffer size) or we hit a hard cap.
+    static func childPIDs(of parentPID: Int32) -> [Int32] {
+        // Let the kernel filter by parent: listing every PID and calling
+        // proc_pidinfo on each costs ~1ms on the main thread per title change.
+        // Start small since a shell rarely has many children; the kernel fills
+        // a too-small buffer completely, so double and retry.
+        guard parentPID > 0 else { return [] }
         let stride = MemoryLayout<Int32>.size
-        let allPids = UInt32(PROC_ALL_PIDS)
-        var slots = max(Int(proc_listpids(allPids, 0, nil, 0)) / stride, 256) * 2
+        var slots = 64
         let cap = 1 << 20  // 1M PIDs — beyond any reasonable system
 
         while slots <= cap {
             var pids = [Int32](repeating: 0, count: slots)
             let writtenBytes = Int(pids.withUnsafeMutableBufferPointer { buf in
-                proc_listpids(allPids, 0, buf.baseAddress, Int32(buf.count * stride))
+                proc_listpids(UInt32(PROC_PPID_ONLY), UInt32(parentPID), buf.baseAddress, Int32(buf.count * stride))
             })
             guard writtenBytes > 0 else { return [] }
             let pidCount = writtenBytes / stride
-
-            // Kernel signals "buffer too small" by filling it completely.
             if pidCount == slots {
                 slots *= 2
                 continue
             }
-
-            var children: [Int32] = []
-            for i in 0..<pidCount {
-                let pid = pids[i]
-                guard pid > 0 else { continue }
-                var info = proc_bsdinfo()
-                let infoSize = Int32(MemoryLayout<proc_bsdinfo>.size)
-                let ret = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, infoSize)
-                if ret > 0 && Int32(info.pbi_ppid) == parentPID {
-                    children.append(pid)
-                }
-            }
-            return children
+            return pids[0..<pidCount].filter { $0 > 0 }
         }
         return []
     }
