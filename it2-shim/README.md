@@ -55,8 +55,10 @@ cp -R zig-out/Ghostty.app /Applications/Ghostty.app
 | `it2 session send -s ID <text>` | 发送文本到终端 |
 | `it2 session focus -s ID` | 聚焦终端 |
 | `it2 session close -s ID` | 关闭终端 |
+| `it2 session show [-s ID] [--json]` | 显示终端信息（ID、名称、CWD、所在 tab/pane；`--json` 额外含 frame）。默认取当前终端（`ITERM_SESSION_ID`） |
 | `it2 session read [-s ID] [-n N]` | 读取终端屏幕内容 |
-| `it2 session capture -o FILE` | 捕获屏幕内容到文件 |
+| `it2 session capture [-s ID] -o FILE` | 捕获屏幕内容到文件（不支持 `--history`，只能捕获可见区域） |
+| `it2 session copy [-s ID]` | 将终端当前选区复制到剪贴板 |
 | `it2 session set-name -s ID <name>` | 设置终端名称 |
 | `it2 session clear [-s ID]` | 清屏 |
 
