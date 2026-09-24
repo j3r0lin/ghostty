@@ -10,6 +10,7 @@ struct NotificationToastView: View {
     let toast: NotificationToast
     var onClick: () -> Void = {}
     var onClose: () -> Void = {}
+    var onHoverChange: (Bool) -> Void = { _ in }
     @State private var isHovered: Bool = false
 
     var body: some View {
@@ -69,7 +70,10 @@ struct NotificationToastView: View {
         .padding(12) // reserve space so shadow isn't clipped by panel bounds
         .contentShape(RoundedRectangle(cornerRadius: 14))
         .onTapGesture(perform: onClick)
-        .onHover { isHovered = $0 }
+        .onHover { hovering in
+            isHovered = hovering
+            onHoverChange(hovering)
+        }
     }
 
     @ViewBuilder

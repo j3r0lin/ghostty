@@ -21,7 +21,7 @@ final class NotificationToastManager {
     )
 
     /// How long a toast stays on screen before auto-dismissal.
-    private let displayDuration: TimeInterval = 8.0
+    private let displayDuration: TimeInterval
     /// Maximum number of toasts visible simultaneously.
     private let maxVisible: Int = 3
     /// Vertical gap between stacked toasts, in points.
@@ -40,6 +40,10 @@ final class NotificationToastManager {
 
     private var entries: [Entry] = []
 
+    init(displayDuration: TimeInterval = 8.0) {
+        self.displayDuration = displayDuration
+    }
+
     // MARK: - Public API
 
     /// Show a toast. Returns immediately; auto-dismissal is scheduled.
@@ -50,8 +54,7 @@ final class NotificationToastManager {
         }
 
         let panel = makePanel(for: toast)
-        var entry = Entry(toast: toast, panel: panel, dismissTask: nil)
-        entries.append(entry)
+        entries.append(Entry(toast: toast, panel: panel, dismissTask: nil))
 
         panel.alphaValue = 0
         positionPanels()
@@ -62,17 +65,12 @@ final class NotificationToastManager {
             panel.animator().alphaValue = 1
         }
 
-        let id = toast.id
-        let task = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(self?.displayDuration ?? 8))
-            guard !Task.isCancelled else { return }
-            self?.dismiss(id: id)
-        }
+        scheduleDismiss(for: toast.id)
+    }
 
-        if let idx = entries.firstIndex(where: { $0.toast.id == toast.id }) {
-            entry.dismissTask = task
-            entries[idx] = entry
-        }
+    /// Whether the given toast is currently shown.
+    func isShowing(id: UUID) -> Bool {
+        entries.contains { $0.toast.id == id }
     }
 
     /// Dismiss a specific toast by ID. No-op if not currently shown.
@@ -81,23 +79,32 @@ final class NotificationToastManager {
         removeEntry(at: idx, animated: true)
     }
 
-    /// Pause auto-dismissal for the given toast (used while the cursor is over it).
+    /// Pause auto-dismissal while the cursor is over the toast and restart it
+    /// when the cursor leaves.
+    func hoverChanged(id: UUID, hovering: Bool) {
+        if hovering {
+            pauseTimer(for: id)
+        } else {
+            scheduleDismiss(for: id)
+        }
+    }
+
+    /// Pause auto-dismissal for the given toast.
     func pauseTimer(for id: UUID) {
         guard let idx = entries.firstIndex(where: { $0.toast.id == id }) else { return }
         entries[idx].dismissTask?.cancel()
         entries[idx].dismissTask = nil
     }
 
-    /// Restart auto-dismissal for the given toast.
-    func resumeTimer(for id: UUID) {
+    /// (Re)start auto-dismissal for the given toast, replacing any pending one.
+    func scheduleDismiss(for id: UUID) {
         guard let idx = entries.firstIndex(where: { $0.toast.id == id }) else { return }
-        let toastID = entries[idx].toast.id
-        let task = Task { @MainActor [weak self] in
+        entries[idx].dismissTask?.cancel()
+        entries[idx].dismissTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(self?.displayDuration ?? 8))
             guard !Task.isCancelled else { return }
-            self?.dismiss(id: toastID)
+            self?.dismiss(id: id)
         }
-        entries[idx].dismissTask = task
     }
 
     // MARK: - Internals
@@ -106,7 +113,10 @@ final class NotificationToastManager {
         let view = NotificationToastView(
             toast: toast,
             onClick: { [weak self] in self?.handleClick(id: toast.id) },
-            onClose: { [weak self] in self?.dismiss(id: toast.id) }
+            onClose: { [weak self] in self?.dismiss(id: toast.id) },
+            onHoverChange: { [weak self] hovering in
+                self?.hoverChanged(id: toast.id, hovering: hovering)
+            }
         )
         let host = NSHostingView(rootView: view)
         host.frame.size = host.fittingSize
