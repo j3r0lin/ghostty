@@ -48,40 +48,17 @@ def _self_session_id():
     return raw.split(":", 1)[1] if ":" in raw else ""
 
 
-def _applescript_target(session_id):
-    """Return an AppleScript expression for the target terminal."""
-    sid = session_id or _self_session_id()
-    if sid:
-        return f'first terminal whose id is "{sid}"'
-    return 'focused terminal of selected tab of front window'
-
-
 def _escape_applescript(text):
     """Escape a string for use inside an AppleScript double-quoted literal."""
     return text.replace("\\", "\\\\").replace('"', '\\"')
 
 
-def _applescript_string_literal(text):
-    """Return an AppleScript expression that evaluates to the given text.
-
-    Single-line strings are returned as double-quoted literals.
-    Multi-line strings use 'linefeed' concatenation.
-    """
-    parts = text.split("\n")
-    escaped_parts = [p.replace("\\", "\\\\").replace('"', '\\"') for p in parts]
-    if len(escaped_parts) == 1:
-        return f'"{escaped_parts[0]}"'
-    return ' & linefeed & '.join(f'"{p}"' for p in escaped_parts)
-
-
-def _applescript_action_text(text):
-    """Return a perform action string for the text: action.
-
-    Handles newlines by returning a list of action strings.
-    """
-    parts = text.split("\n")
-    escaped_parts = [p.replace("\\", "\\\\").replace('"', '\\"') for p in parts]
-    return escaped_parts
+def _applescript_target(session_id):
+    """Return an AppleScript expression for the target terminal."""
+    sid = session_id or _self_session_id()
+    if sid:
+        return f'first terminal whose id is "{_escape_applescript(sid)}"'
+    return 'focused terminal of selected tab of front window'
 
 
 def _friendly_error(stderr):
@@ -247,9 +224,10 @@ def cmd_session_focus(args):
     if not session_id:
         sys.exit(0)
 
+    target = _applescript_target(session_id)
     script = f'''
 tell application "Ghostty"
-  set t to first terminal whose id is "{session_id}"
+  set t to {target}
   focus t
 end tell'''
     run_applescript(script)
@@ -259,9 +237,10 @@ def cmd_session_close(args):
     if not args.session:
         sys.exit(0)
 
+    target = _applescript_target(args.session)
     script = f'''
 tell application "Ghostty"
-  close (first terminal whose id is "{args.session}")
+  close ({target})
 end tell'''
     _run_and_check(script)
 
@@ -572,17 +551,18 @@ def cmd_session_layout(args):
 
 def cmd_session_tabs(args):
     my_id = _self_session_id()
+    my_id_escaped = _escape_applescript(my_id)
 
     r = run_applescript(f'''
 tell application "Ghostty"
   set tabCount to count of tabs of front window
   set selIdx to index of selected tab of front window
   set myTabIdx to 0
-  if "{my_id}" is not "" then
+  if "{my_id_escaped}" is not "" then
     repeat with wi in (every window)
       repeat with t in (every tab of wi)
         repeat with trm in (every terminal of t)
-          if id of trm is "{my_id}" then
+          if id of trm is "{my_id_escaped}" then
             set myTabIdx to index of t
             exit repeat
           end if
