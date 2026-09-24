@@ -114,113 +114,100 @@ struct TerminalRestorableTests {
 // MARK: - Agent Restore Command Tests
 
 extension TerminalRestorableTests {
-    @Test
-    func deduplicateFlagsEmpty() {
-        #expect(TerminalWindowRestoration.deduplicateFlags([]) == [])
+    private static let sid = "12345678-1234-1234-1234-123456789abc"
+
+    private func restore(_ argv: [String], sessionID: String = sid) -> String? {
+        TerminalWindowRestoration.agentRestoreCommand(argv: argv, sessionID: sessionID)
     }
 
     @Test
-    func deduplicateFlagsSingleElement() {
-        #expect(TerminalWindowRestoration.deduplicateFlags(["claude"]) == ["claude"])
+    func agentRestoreAppendsResume() {
+        #expect(restore(["claude", "--model", "opus"]) == "claude --model opus --resume \(Self.sid)")
     }
 
     @Test
-    func deduplicateFlagsNoFlags() {
-        #expect(TerminalWindowRestoration.deduplicateFlags(["claude", "chat"]) == ["claude", "chat"])
+    func agentRestoreReplacesSessionSelectionFlags() {
+        let argv = ["claude", "--resume", "old-id", "-c", "--session-id", "x", "--fork-session", "--model", "opus"]
+        #expect(restore(argv) == "claude --model opus --resume \(Self.sid)")
     }
 
     @Test
-    func deduplicateFlagsBooleanDuplicates() {
-        let input = ["claude", "--verbose", "--verbose", "--verbose"]
-        #expect(TerminalWindowRestoration.deduplicateFlags(input) == ["claude", "--verbose"])
+    func agentRestoreReplacesShortResume() {
+        #expect(restore(["claude", "-r", "old-id", "--verbose"]) == "claude --verbose --resume \(Self.sid)")
     }
 
     @Test
-    func deduplicateFlagsFlagValueDuplicates() {
-        let input = [
+    func agentRestoreDropsInitialPrompt() {
+        #expect(restore(["claude", "fix the bug", "--model", "opus"]) == "claude --model opus --resume \(Self.sid)")
+    }
+
+    @Test
+    func agentRestoreDropsPromptAfterBooleanFlag() {
+        #expect(restore(["claude", "--dangerously-skip-permissions", "fix the bug"])
+            == "claude --dangerously-skip-permissions --resume \(Self.sid)")
+    }
+
+    @Test
+    func agentRestoreDropsArgumentsAfterDoubleDash() {
+        #expect(restore(["claude", "--verbose", "--", "-not-a-flag"]) == "claude --verbose --resume \(Self.sid)")
+    }
+
+    @Test
+    func agentRestoreKeepsVariadicValues() {
+        #expect(restore(["claude", "--add-dir", "/a", "/b", "--verbose"])
+            == "claude --add-dir /a /b --verbose --resume \(Self.sid)")
+    }
+
+    @Test
+    func agentRestoreKeepsInlineValues() {
+        #expect(restore(["claude", "--model=opus", "prompt"]) == "claude --model=opus --resume \(Self.sid)")
+    }
+
+    @Test
+    func agentRestoreKeepsUnknownFlagValue() {
+        #expect(restore(["claude", "--some-new-flag", "value"]) == "claude --some-new-flag value --resume \(Self.sid)")
+    }
+
+    @Test
+    func agentRestoreCollapsesRepeatedFlags() {
+        let argv = [
             "claude",
-            "--plugin-dir", "/path/a",
-            "--plugin-dir", "/path/a",
+            "--dangerously-skip-permissions",
+            "--plugin-dir", "/Users/j/claude-personal",
+            "--dangerously-skip-permissions",
+            "--plugin-dir", "/Users/j/claude-personal",
             "--model", "opus",
         ]
-        let expected = ["claude", "--plugin-dir", "/path/a", "--model", "opus"]
-        #expect(TerminalWindowRestoration.deduplicateFlags(input) == expected)
+        #expect(restore(argv)
+            == "claude --dangerously-skip-permissions --plugin-dir /Users/j/claude-personal --model opus --resume \(Self.sid)")
     }
 
     @Test
-    func deduplicateFlagsSameKeyDifferentValues() {
-        let input = ["claude", "--plugin-dir", "/path/a", "--plugin-dir", "/path/b"]
-        #expect(TerminalWindowRestoration.deduplicateFlags(input) == input)
+    func agentRestoreKeepsSameFlagWithDifferentValues() {
+        #expect(restore(["claude", "--plugin-dir", "/a", "--plugin-dir", "/b"])
+            == "claude --plugin-dir /a --plugin-dir /b --resume \(Self.sid)")
     }
 
     @Test
-    func deduplicateFlagsRealisticClaude() {
-        let input = [
-            "claude",
-            "--dangerously-skip-permissions",
-            "--plugin-dir", "/Users/j/claude-personal",
-            "--dangerously-skip-permissions",
-            "--plugin-dir", "/Users/j/claude-personal",
-            "--dangerously-skip-permissions",
-            "--plugin-dir", "/Users/j/claude-personal",
-            "--model", "opus",
-        ]
-        let expected = [
-            "claude",
-            "--dangerously-skip-permissions",
-            "--plugin-dir", "/Users/j/claude-personal",
-            "--model", "opus",
-        ]
-        #expect(TerminalWindowRestoration.deduplicateFlags(input) == expected)
+    func agentRestoreSkipsNonInteractiveInvocations() {
+        #expect(restore(["claude", "-p", "summarize"]) == nil)
+        #expect(restore(["claude", "--print", "summarize"]) == nil)
     }
 
     @Test
-    func agentRestoreCommandStripsResumeAndContinue() {
-        let argv = ["claude", "--resume", "old-id", "--continue", "--model", "opus"]
-        let result = TerminalWindowRestoration.agentRestoreCommand(argv: argv, sessionID: nil)
-        #expect(result == "claude --model opus")
+    func agentRestoreRejectsNonUUIDSessionID() {
+        #expect(restore(["claude", "--model", "opus"], sessionID: "not-a-uuid") == nil)
     }
 
     @Test
-    func agentRestoreCommandStripsShortResumeAndContinue() {
-        let argv = ["claude", "-r", "old-id", "-c", "--model", "opus"]
-        let result = TerminalWindowRestoration.agentRestoreCommand(argv: argv, sessionID: nil)
-        #expect(result == "claude --model opus")
+    func agentRestoreQuotesSpecialChars() {
+        #expect(restore(["claude", "--model", "claude-opus-4-6[1m]"])
+            == "claude --model 'claude-opus-4-6[1m]' --resume \(Self.sid)")
     }
 
     @Test
-    func agentRestoreCommandStripsShortFlagsAndAppendsNewSession() {
-        let argv = ["claude", "-r", "old-id", "--model", "opus"]
-        let sid = "12345678-1234-1234-1234-123456789abc"
-        let result = TerminalWindowRestoration.agentRestoreCommand(argv: argv, sessionID: sid)
-        #expect(result == "claude --model opus --resume \(sid)")
-    }
-
-    @Test
-    func agentRestoreCommandInsertsNewSessionID() {
-        let argv = ["claude", "--model", "opus"]
-        let sid = "12345678-1234-1234-1234-123456789abc"
-        let result = TerminalWindowRestoration.agentRestoreCommand(argv: argv, sessionID: sid)
-        #expect(result == "claude --model opus --resume \(sid)")
-    }
-
-    @Test
-    func agentRestoreCommandRejectsNonUUIDSessionID() {
-        let argv = ["claude", "--model", "opus"]
-        let result = TerminalWindowRestoration.agentRestoreCommand(argv: argv, sessionID: "not-a-uuid")
-        #expect(result == "claude --model opus")
-    }
-
-    @Test
-    func agentRestoreCommandQuotesSpecialChars() {
-        let argv = ["claude", "--model", "claude-opus-4-6[1m]"]
-        let result = TerminalWindowRestoration.agentRestoreCommand(argv: argv, sessionID: nil)
-        #expect(result == "claude --model 'claude-opus-4-6[1m]'")
-    }
-
-    @Test
-    func agentRestoreCommandEmptyArgv() {
-        #expect(TerminalWindowRestoration.agentRestoreCommand(argv: [], sessionID: nil) == nil)
+    func agentRestoreEmptyArgv() {
+        #expect(restore([]) == nil)
     }
 }
 

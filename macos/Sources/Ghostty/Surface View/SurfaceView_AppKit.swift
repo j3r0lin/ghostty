@@ -210,6 +210,14 @@ extension Ghostty {
         // the surface has been live for any length of time.
         var savedAgentArgv: [String]?
 
+        // The Claude Code session ID saved alongside `savedAgentArgv`.
+        var savedAgentSessionID: String?
+
+        // The last session ID found for the running agent process. The final
+        // state save can race the agent's shutdown hook marking its session
+        // ended, so the same process falls back to the last known ID.
+        private var lastAgentSession: (pid: pid_t, id: String)?
+
         // The cached contents of the screen.
         private(set) var cachedScreenContents: CachedValue<String>
         private(set) var cachedVisibleContents: CachedValue<String>
@@ -1948,6 +1956,7 @@ extension Ghostty {
             case title
             case isUserSetTitle
             case agentArgv
+            case agentSessionID
         }
 
         required convenience init(from decoder: Decoder) throws {
@@ -1965,6 +1974,7 @@ extension Ghostty {
             let savedTitle = try container.decodeIfPresent(String.self, forKey: .title)
             let isUserSetTitle = try container.decodeIfPresent(Bool.self, forKey: .isUserSetTitle) ?? false
             let argv = try container.decodeIfPresent([String].self, forKey: .agentArgv)
+            let agentSessionID = try container.decodeIfPresent(String.self, forKey: .agentSessionID)
 
             self.init(app, baseConfig: config, uuid: uuid)
 
@@ -1978,6 +1988,7 @@ extension Ghostty {
             }
 
             self.savedAgentArgv = argv
+            self.savedAgentSessionID = agentSessionID
         }
 
         func encode(to encoder: Encoder) throws {
@@ -1986,7 +1997,24 @@ extension Ghostty {
             try container.encode(id.uuidString, forKey: .uuid)
             try container.encode(title, forKey: .title)
             try container.encode(titleFromTerminal != nil, forKey: .isUserSetTitle)
-            try container.encodeIfPresent(detectedAgentSession?.argv, forKey: .agentArgv)
+            // Only Claude Code sessions can be resumed; restarting any other
+            // agent would silently start a new conversation.
+            if let agent = detectedAgentSession, let sessionID = currentClaudeSessionID() {
+                try container.encode(agent.argv, forKey: .agentArgv)
+                try container.encode(sessionID, forKey: .agentSessionID)
+            }
+        }
+
+        private func currentClaudeSessionID() -> String? {
+            guard let agent = detectedAgentSession, agent.agent == .claude else { return nil }
+            if let session = ClaudeCodeSession.latestSession(
+                forTerminalID: id.uuidString,
+                requiringStatus: "running") {
+                lastAgentSession = (agent.pid, session.sessionID)
+                return session.sessionID
+            }
+            if let last = lastAgentSession, last.pid == agent.pid { return last.id }
+            return nil
         }
     }
 }

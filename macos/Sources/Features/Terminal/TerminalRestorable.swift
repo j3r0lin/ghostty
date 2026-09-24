@@ -190,12 +190,11 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
         // completes, avoiding races with interactive prompts (e.g. oh-my-zsh
         // update checks) that would consume characters from pty injection.
         for view in c.surfaceTree {
-            guard let argv = view.savedAgentArgv, !argv.isEmpty else { continue }
+            guard let argv = view.savedAgentArgv,
+                  let sessionID = view.savedAgentSessionID else { continue }
             view.savedAgentArgv = nil
-            let session = ClaudeCodeSession.latestSession(
-                forTerminalID: view.id.uuidString,
-                requiringStatus: "running")
-            if let command = agentRestoreCommand(argv: argv, sessionID: session?.sessionID) {
+            view.savedAgentSessionID = nil
+            if let command = agentRestoreCommand(argv: argv, sessionID: sessionID) {
                 writeRestoreFile(command, forSurfaceID: view.id)
             }
         }
@@ -210,75 +209,74 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
         c.toggleFullscreen(mode: mode)
     }
 
-    static func agentRestoreCommand(argv: [String], sessionID: String?) -> String? {
-        guard !argv.isEmpty else { return nil }
+    // Claude Code flags that take no value. Any other flag consumes the next
+    // token as its value, as Claude Code's own parser does for required and
+    // optional values. Unknown flags are assumed to take one, so their value
+    // is never mistaken for a prompt and dropped.
+    private static let claudeBooleanFlags: Set<String> = [
+        "--allow-dangerously-skip-permissions", "--ax-screen-reader", "--bare",
+        "--brief", "--chrome", "--no-chrome", "--dangerously-skip-permissions",
+        "--disable-slash-commands", "--exclude-dynamic-system-prompt-sections",
+        "--forward-subagent-text", "--ide", "--include-hook-events",
+        "--include-partial-messages", "--no-session-persistence",
+        "--replay-user-messages", "--restricted", "--safe-mode",
+        "--strict-mcp-config", "--verbose", "--fork-session",
+        "-c", "--continue", "-p", "--print", "--bg", "--background",
+        "-h", "--help", "-v", "--version",
+    ]
 
-        // Flags that take a value (so we also need to drop the next token).
-        let stripWithValue: Set<String> = ["--resume", "-r", "--session-id"]
-        // Boolean flags (no following value).
-        let stripBoolean: Set<String> = ["--continue", "-c"]
+    // Flags that consume every following non-flag token.
+    private static let claudeVariadicFlags: Set<String> = [
+        "--add-dir", "--allowedTools", "--allowed-tools", "--betas",
+        "--disallowedTools", "--disallowed-tools", "--file", "--mcp-config", "--tools",
+    ]
 
-        var parts = argv
-        var i = 0
-        while i < parts.count {
-            let flag = parts[i]
-            if stripWithValue.contains(flag) {
-                parts.remove(at: i)
-                if i < parts.count && !parts[i].hasPrefix("-") {
-                    parts.remove(at: i)
-                }
-                continue
-            }
-            if stripBoolean.contains(flag) {
-                parts.remove(at: i)
-                continue
-            }
-            i += 1
-        }
+    // Flags that pick which session to open; replaced by `--resume <id>`.
+    private static let claudeSessionFlags: Set<String> = [
+        "-r", "--resume", "-c", "--continue", "--session-id", "--fork-session",
+        "--from-pr", "--teleport",
+    ]
 
-        // Deduplicate flags: shell wrapper functions (e.g. the user's claude()
-        // alias) often inject the same flags on every invocation, so the
-        // captured argv can contain 3× copies of "--flag value" pairs.
-        // macOS pty canonical-mode line buffer is 1024 bytes — a long
-        // command that arrives before the shell switches to raw mode gets
-        // truncated, losing the trailing CR and preventing execution.
-        parts = deduplicateFlags(parts)
+    // Invocations that don't leave an interactive session to resume.
+    private static let claudeNonInteractiveFlags: Set<String> = [
+        "-p", "--print", "--bg", "--background", "-h", "--help", "-v", "--version",
+    ]
 
-        if let sessionID = sessionID, UUID(uuidString: sessionID) != nil {
-            parts.append(contentsOf: ["--resume", sessionID])
-        }
+    /// Builds the shell command that resumes a Claude Code session with the
+    /// flags it was started with. Positional arguments (the initial prompt)
+    /// are dropped so they aren't sent again on every restore, and repeated
+    /// flags are collapsed: shell wrapper functions often inject the same
+    /// flags on every invocation, and a long command can overflow the 1024
+    /// byte canonical-mode line buffer before the shell switches to raw mode.
+    static func agentRestoreCommand(argv: [String], sessionID: String) -> String? {
+        guard let program = argv.first, UUID(uuidString: sessionID) != nil else { return nil }
 
-        return parts.map { shellQuote($0) }.joined(separator: " ")
-    }
-
-    static func deduplicateFlags(_ parts: [String]) -> [String] {
-        guard parts.count > 1 else { return parts }
-        var result = [parts[0]]
-        var seen = Set<String>()
+        var units: [[String]] = []
         var i = 1
-        while i < parts.count {
-            let arg = parts[i]
-            if arg.hasPrefix("-") {
-                let hasValue = i + 1 < parts.count && !parts[i + 1].hasPrefix("-")
-                let key = hasValue ? arg + "\0" + parts[i + 1] : arg
-                if seen.contains(key) {
-                    i += hasValue ? 2 : 1
-                    continue
-                }
-                seen.insert(key)
-                result.append(arg)
-                if hasValue {
-                    result.append(parts[i + 1])
-                    i += 2
-                } else {
+        while i < argv.count {
+            let arg = argv[i]
+            i += 1
+            if arg == "--" { break }
+            guard arg.hasPrefix("-"), arg.count > 1 else { continue }
+
+            let name = arg.split(separator: "=", maxSplits: 1).first.map(String.init) ?? arg
+            var unit = [arg]
+            if !arg.contains("="), !claudeBooleanFlags.contains(name) {
+                let variadic = claudeVariadicFlags.contains(name)
+                while i < argv.count, !argv[i].hasPrefix("-") {
+                    unit.append(argv[i])
                     i += 1
+                    if !variadic { break }
                 }
-            } else {
-                result.append(arg)
-                i += 1
             }
+
+            if claudeNonInteractiveFlags.contains(name) { return nil }
+            if claudeSessionFlags.contains(name) { continue }
+            if !units.contains(unit) { units.append(unit) }
         }
-        return result
+
+        let parts = [program] + units.flatMap { $0 } + ["--resume", sessionID]
+        return parts.map { shellQuote($0) }.joined(separator: " ")
     }
 
     private static func shellQuote(_ s: String) -> String {
