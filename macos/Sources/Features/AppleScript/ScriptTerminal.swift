@@ -142,7 +142,7 @@ final class ScriptTerminal: NSObject {
             baseConfig = nil
         }
 
-        guard let controller = surfaceView.window?.windowController as? BaseTerminalController else {
+        guard let controller = BaseTerminalController.controller(owning: surfaceView) else {
             command.scriptErrorNumber = errAEEventFailed
             command.scriptErrorString = "Terminal is not in a splittable window."
             return nil
@@ -172,7 +172,7 @@ final class ScriptTerminal: NSObject {
             return nil
         }
 
-        guard let controller = surfaceView.window?.windowController as? BaseTerminalController else {
+        guard let controller = BaseTerminalController.controller(owning: surfaceView) else {
             command.scriptErrorNumber = errAEEventFailed
             command.scriptErrorString = "Terminal is not in a window."
             return nil
@@ -193,7 +193,7 @@ final class ScriptTerminal: NSObject {
             return nil
         }
 
-        guard let controller = surfaceView.window?.windowController as? BaseTerminalController else {
+        guard let controller = BaseTerminalController.controller(owning: surfaceView) else {
             command.scriptErrorNumber = errAEEventFailed
             command.scriptErrorString = "Terminal is not in a window."
             return nil
