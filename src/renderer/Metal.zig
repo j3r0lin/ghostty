@@ -258,6 +258,17 @@ pub inline fn present(self: *Metal, target: Target, sync: bool) !void {
     }
 }
 
+/// Called after the swap chain has been released.
+///
+/// The layer still references the last presented IOSurface, whose
+/// texture is now gone. On discrete GPUs (managed storage) the compositor
+/// then shows garbage, a solid red frame on AMD, when the surface is
+/// unhidden before the rebuilt swap chain presents. Clearing the contents
+/// shows the window background for that frame instead.
+pub fn gpuResourcesReleased(self: *Metal) void {
+    self.layer.clearSurface();
+}
+
 /// Returns the options to use when constructing buffers.
 pub inline fn bufferOptions(self: Metal) bufferpkg.Options {
     return .{

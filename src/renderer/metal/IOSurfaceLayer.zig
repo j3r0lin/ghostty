@@ -122,6 +122,37 @@ fn setSurfaceCallback(
     layer.setProperty("contents", surface);
 }
 
+/// Clears the layer's `contents`.
+///
+/// Dispatched to the main thread like `setSurface`, so it lands after
+/// any frame that is still queued to be presented.
+pub fn clearSurface(self: *IOSurfaceLayer) void {
+    var block = ClearSurfaceBlock.init(.{
+        .layer = self.layer.value,
+    }, &clearSurfaceCallback);
+
+    const NSThread = objc.getClass("NSThread").?;
+    if (NSThread.msgSend(bool, "isMainThread", .{})) {
+        clearSurfaceCallback(&block);
+    } else {
+        macos.dispatch.dispatch_async(
+            @ptrCast(macos.dispatch.queue.getMain()),
+            @ptrCast(&block),
+        );
+    }
+}
+
+const ClearSurfaceBlock = objc.Block(struct {
+    layer: objc.c.id,
+}, .{}, void);
+
+fn clearSurfaceCallback(
+    block: *const ClearSurfaceBlock.Context,
+) callconv(.c) void {
+    const layer = objc.Object.fromId(block.layer);
+    layer.msgSend(void, "setContents:", .{@as(objc.c.id, null)});
+}
+
 pub const DisplayCallback = ?*align(8) const fn (?*anyopaque) void;
 
 pub fn setDisplayCallback(

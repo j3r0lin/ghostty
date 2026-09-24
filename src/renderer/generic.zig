@@ -1183,6 +1183,10 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                 // frees all GPU resources.
                 sc.deinit();
                 self.swap_chain = null;
+
+                if (comptime @hasDecl(GraphicsAPI, "gpuResourcesReleased")) {
+                    self.api.gpuResourcesReleased();
+                }
             }
 
             // Release the shaders as well if we're unrealized.
