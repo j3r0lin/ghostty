@@ -19,11 +19,17 @@ extension Ghostty {
             }
         }
 
-        // The progress report (if any). Cleared only by an explicit OSC 9;4;0
-        // (remove) or when the child process exits.
+        // The progress report (if any). Cleared by an explicit OSC 9;4;0
+        // (remove), when the child process exits, or once the foreground
+        // process group that reported it is gone: programs that exit without
+        // sending remove would otherwise leave it up until the shell exits.
         override var progressReport: Action.ProgressReport? {
-            didSet {}
+            didSet {
+                progressOwner.record(reporting: progressReport != nil, foreground: surfaceModel?.foregroundPID)
+            }
         }
+
+        private var progressOwner = ProgressOwner()
 
         // The currently active key sequence. The sequence is not active if this is empty.
         @Published var keySequence: [KeyboardShortcut] = []
@@ -451,6 +457,9 @@ extension Ghostty {
                 }
                 return
             }
+            if progressOwner.isStale(foreground: pid) {
+                progressReport = nil
+            }
             let result = CLIAgentDetector.detectWithPID(fromPID: pid)
             let agent = result?.agent
             if agent != detectedAgent {
@@ -471,6 +480,20 @@ extension Ghostty {
                     detectedAgentSession = CLIAgentSessionInfo(
                         agent: result.agent, argv: argv, execPath: execPath, pid: result.matchedPID)
                 }
+            }
+        }
+
+        /// The foreground process group that last reported progress.
+        struct ProgressOwner {
+            private var pgid: Int?
+
+            mutating func record(reporting: Bool, foreground: Int?) {
+                pgid = reporting ? foreground : nil
+            }
+
+            func isStale(foreground: Int) -> Bool {
+                guard let pgid else { return false }
+                return pgid != foreground
             }
         }
 
