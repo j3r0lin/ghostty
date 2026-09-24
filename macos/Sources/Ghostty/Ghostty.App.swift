@@ -827,24 +827,8 @@ extension Ghostty {
         }
 
         private static func restartApp() {
-            // Relaunch by spawning a detached shell that waits for this process to
-            // fully exit, then `open`s the app normally. Going through the normal
-            // LaunchServices path means the new instance coalesces with the existing
-            // (possibly Dock-pinned) app icon. Using openApplication with
-            // createsNewApplicationInstance here would spawn a second instance that
-            // gets its own, separate Dock tile.
-            let path = Bundle.main.bundlePath
-            let pid = ProcessInfo.processInfo.processIdentifier
-            let task = Process()
-            task.executableURL = URL(fileURLWithPath: "/bin/sh")
-            task.arguments = ["-c", "while kill -0 \(pid) 2>/dev/null; do sleep 0.1; done; open \"\(path)\""]
-            do {
-                try task.run()
-            } catch {
-                Ghostty.logger.warning("restart failed: \(error.localizedDescription)")
-                return
-            }
-            exit(0)
+            guard let appDelegate = NSApplication.shared.delegate as? AppDelegate else { return }
+            appDelegate.restart()
         }
 
         private static func openURL(

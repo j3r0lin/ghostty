@@ -92,6 +92,10 @@ class AppDelegate: NSObject,
     /// seconds since the process was launched.
     private var applicationLaunchTime: TimeInterval = 0
 
+    /// Set by `restart()` for the duration of the termination flow so that
+    /// `applicationWillTerminate` knows to relaunch.
+    private var relaunchAfterTerminate: Bool = false
+
     /// AppKit treats positional command-line arguments as documents to open. This
     /// filter consumes the corresponding open-file events for arguments following
     /// `-e`. It is initialized lazily because most launches never open a file.
@@ -430,6 +434,34 @@ class AppDelegate: NSObject,
         // so remove them all now. In the future we may want to be
         // more selective and only remove surface-targeted notifications.
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+
+        if relaunchAfterTerminate { spawnRelaunch() }
+    }
+
+    /// Restart through the normal termination flow, so quit confirmation and
+    /// cancelling it behave exactly like Cmd-Q.
+    func restart() {
+        relaunchAfterTerminate = true
+        NSApp.terminate(nil)
+        // terminate(_:) only returns when the user cancelled the quit.
+        relaunchAfterTerminate = false
+    }
+
+    private func spawnRelaunch() {
+        // Wait for this process to fully exit, then `open` the app normally.
+        // Going through LaunchServices lets the new instance coalesce with the
+        // existing (possibly Dock-pinned) icon; openApplication with
+        // createsNewApplicationInstance would get a separate Dock tile.
+        let path = Bundle.main.bundlePath
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/sh")
+        task.arguments = ["-c", "while kill -0 \(pid) 2>/dev/null; do sleep 0.1; done; open \"\(path)\""]
+        do {
+            try task.run()
+        } catch {
+            Self.logger.warning("restart failed: \(error.localizedDescription)")
+        }
     }
 
     /// This is called when the application is already open and someone double-clicks the icon
