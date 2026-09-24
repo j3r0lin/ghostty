@@ -5,10 +5,13 @@ the pure functions plus a handful of command handlers with the AppleScript
 runner mocked out, so no real osascript/it2 call is ever made.
 """
 import argparse
+import contextlib
 import importlib.machinery
 import importlib.util
+import io
 import os
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -116,6 +119,31 @@ class SessionFocusCloseInjectionTests(unittest.TestCase):
         self.assertEqual(occurrences, 2)
         self.assertNotIn(MALICIOUS_ID, script.replace(
             it2._escape_applescript(MALICIOUS_ID), ""))
+
+
+class SessionCaptureHistoryTests(unittest.TestCase):
+    def test_history_flag_errors_without_running_applescript(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "out.txt")
+            args = argparse.Namespace(session=None, output=out, history=True)
+            with mock.patch.object(it2, "run_applescript") as run, \
+                 contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as ctx:
+                    it2.cmd_session_capture(args)
+            run.assert_not_called()
+            self.assertNotEqual(ctx.exception.code, 0)
+            self.assertFalse(os.path.exists(out))
+
+    def test_without_history_flag_writes_visible_screen(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "out.txt")
+            args = argparse.Namespace(session=None, output=out, history=False)
+            with mock.patch.object(it2, "run_applescript") as run, \
+                 contextlib.redirect_stdout(io.StringIO()):
+                run.return_value = mock.Mock(returncode=0, stdout="screen contents\n", stderr="")
+                it2.cmd_session_capture(args)
+            with open(out) as f:
+                self.assertEqual(f.read(), "screen contents")
 
 
 if __name__ == "__main__":

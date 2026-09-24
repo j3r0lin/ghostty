@@ -626,6 +626,13 @@ end tell'''
 
 
 def cmd_session_capture(args):
+    # Scrollback is only reachable through the write_scrollback_file:copy
+    # action, which overwrites the user's clipboard.
+    if getattr(args, "history", False):
+        print("session capture: --history is not supported (Ghostty's AppleScript "
+              "content covers only the visible screen)", file=sys.stderr)
+        sys.exit(1)
+
     target = _applescript_target(args.session)
     script = f'''
 tell application "Ghostty"
@@ -833,7 +840,7 @@ def build_parser():
     p = sub.add_parser("capture", help="capture screen to file")
     p.add_argument("-s", "--session", metavar="ID", help="target terminal (default: focused)")
     p.add_argument("-o", "--output", required=True, metavar="FILE", help="output file path")
-    p.add_argument("--history", action="store_true", help="include scrollback history")
+    p.add_argument("--history", action="store_true", help="not supported on Ghostty (visible screen only)")
     p.set_defaults(func=cmd_session_capture)
 
     # set-name
