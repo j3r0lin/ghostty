@@ -57,7 +57,15 @@ struct ConfigurationErrorsView<ViewModel: ConfigurationErrorsViewModel>: View {
     /// Diagnostics describe a configuration that loaded while skipping the
     /// broken lines. A rejection describes one that was not loaded at all,
     /// leaving the running configuration exactly as it was.
-    private var summary: String {
+    ///
+    /// The type must stay `LocalizedStringKey`: only the localized-string
+    /// initializer parses the markdown and applies the `inflect` agreement,
+    /// while a `String` renders the marker text itself.
+    ///
+    /// Within an inflected span only the word that ends it is pluralized, so
+    /// the rejection names its noun last. The diagnostics wording keeps the
+    /// original `error(s)` shorthand, which never pluralizes.
+    private var summary: LocalizedStringKey {
         switch model.notice {
         case .diagnostics:
             return """
@@ -66,7 +74,7 @@ struct ConfigurationErrorsView<ViewModel: ConfigurationErrorsViewModel>: View {
                 """
         case .rejected:
             return """
-                ^[\(model.errors.count) error(s)](inflect: true) kept this configuration from loading. \
+                ^[\(model.errors.count) errors](inflect: true) kept this configuration from loading. \
                 Nothing was changed. Fix the errors below and the configuration will reload on its own.
                 """
         }
