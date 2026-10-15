@@ -4058,7 +4058,6 @@ pub fn loadFile(self: *Config, alloc: Allocator, path: []const u8) !void {
     // later reload needs to notice being fixed or created.
     try self.noteLoadPath(path);
     var file = file_load.open(global.io(), path) catch |err| switch (err) {
-        error.FileIsEmpty => return,
         error.NotAFile => {
             log.warn(
                 "config-file {s}: not reading because it is not a file",
@@ -4157,8 +4156,10 @@ pub fn loadOptionalFile(
         return .loaded;
     } else |err| switch (err) {
         error.FileNotFound => return .not_found,
+        // An empty file is .error at baseline, which is what tells
+        // loadDefaultFiles the file exists and no template is needed.
+        error.FileIsEmpty => return .@"error",
         else => {
-            // 可选文件的读取错误不会向上传递，重载仍需保留失败状态。
             self._load_failed = true;
             std.log.warn(
                 "error reading optional config file, not loading err={} path={s}",

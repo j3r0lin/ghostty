@@ -31,6 +31,10 @@ final class ConfigReloader {
     /// Whether the path itself existed when its watch was last opened. A path
     /// watched through its parent reloads only once the path appears.
     private var existed: [String: Bool] = [:]
+    /// Bumped each time a path is re-opened. A cancelled source's handler runs
+    /// after the replacement has been stored, so it must only clear state that
+    /// still belongs to its own generation.
+    private var generation: [String: UInt] = [:]
     private var settle: DispatchWorkItem?
 
     /// Replace the watched set. A path that is already watched is left
@@ -52,6 +56,9 @@ final class ConfigReloader {
     }
 
     deinit {
+        for source in sources.values {
+            source.cancel()
+        }
         for descriptor in descriptors.values {
             close(descriptor)
         }
@@ -77,6 +84,8 @@ final class ConfigReloader {
         let descriptor = open(target, O_EVTONLY)
         guard descriptor >= 0 else { return }
         descriptors[path] = descriptor
+        generation[path, default: 0] += 1
+        let opened = generation[path]!
 
         let source = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: descriptor,
@@ -86,13 +95,10 @@ final class ConfigReloader {
             self?.pathChanged(path)
         }
         source.setCancelHandler { [weak self] in
-            guard let self else {
-                close(descriptor)
-                return
-            }
+            defer { close(descriptor) }
+            guard let self, self.generation[path] == opened else { return }
             self.descriptors.removeValue(forKey: path)
             self.existed.removeValue(forKey: path)
-            close(descriptor)
         }
         sources[path] = source
         source.resume()

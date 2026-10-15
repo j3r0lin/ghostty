@@ -108,11 +108,12 @@ extension Ghostty {
             if loadFailed {
                 return .unloadable(errors)
             }
-            let diagnostics = errors
-            if !diagnostics.isEmpty {
-                return .invalid(diagnostics)
+            // A diagnostic that came from a CLI argument stays visible but
+            // does not reject the reload: editing the file cannot fix it.
+            guard let cfg = config, ghostty_config_reload_diagnostics_count(cfg) > 0 else {
+                return nil
             }
-            return nil
+            return .invalid(errors)
         }
 
         static func loadConfig(at path: String?, finalize: Bool) -> ghostty_config_t? {

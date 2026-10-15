@@ -54,7 +54,8 @@ struct ConfigReloadTests {
     /// so the title it sets never reaches the running configuration.
     @Test func invalidCandidateIsRejectedWhole() throws {
         let broken = try TemporaryConfig("title = Replaced\nnot-a-real-field = 1")
-        guard case .reject(.invalid, _) = Ghostty.Config.verdict(at: broken.temporaryFile.path()) else {
+        guard case .reject(_, let candidate) = Ghostty.Config.verdict(at: broken.temporaryFile.path()),
+              let candidate, !candidate.errors.isEmpty else {
             Issue.record("a candidate that sets title alongside an error was accepted")
             return
         }
@@ -64,16 +65,17 @@ struct ConfigReloadTests {
 
     @Test func unknownFieldRejectsTheWholeFile() throws {
         let config = try TemporaryConfig("not-a-real-field = 1\ncursor-style = block")
-        guard case .reject(.invalid(let errors), _) = Ghostty.Config.verdict(at: config.temporaryFile.path()) else {
+        guard case .reject(_, let candidate) = Ghostty.Config.verdict(at: config.temporaryFile.path()),
+              let candidate, !candidate.errors.isEmpty else {
             Issue.record("an unknown field was accepted")
             return
         }
-        #expect(!errors.isEmpty)
     }
 
     @Test func invalidValueRejectsTheWholeFile() throws {
         let config = try TemporaryConfig("cursor-style = sideways")
-        guard case .reject(.invalid, _) = Ghostty.Config.verdict(at: config.temporaryFile.path()) else {
+        guard case .reject(_, let candidate) = Ghostty.Config.verdict(at: config.temporaryFile.path()),
+              let candidate, !candidate.errors.isEmpty else {
             Issue.record("an invalid value was accepted")
             return
         }
@@ -84,7 +86,8 @@ struct ConfigReloadTests {
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension("ghostty")
             .path()
-        guard case .reject(.unloadable, _) = Ghostty.Config.verdict(at: missing) else {
+        guard case .reject(_, let candidate) = Ghostty.Config.verdict(at: missing),
+              let candidate, !candidate.errors.isEmpty else {
             Issue.record("a missing configuration was treated as loaded")
             return
         }
@@ -92,7 +95,8 @@ struct ConfigReloadTests {
 
     @Test func missingReferencedFileRejectsTheWholeFile() throws {
         let config = try TemporaryConfig("config-file = /ghostty-does-not-exist/extra")
-        guard case .reject(.invalid, _) = Ghostty.Config.verdict(at: config.temporaryFile.path()) else {
+        guard case .reject(_, let candidate) = Ghostty.Config.verdict(at: config.temporaryFile.path()),
+              let candidate, !candidate.errors.isEmpty else {
             Issue.record("a missing config-file was accepted")
             return
         }
@@ -133,6 +137,38 @@ struct ConfigReloadTests {
 
         try "title = AfterEmpty\n".write(to: config.temporaryFile, atomically: true, encoding: .utf8)
         try await changes.waitFor(1)
+    }
+
+    @Test func consecutiveAtomicSavesEachReload() async throws {
+        let config = try TemporaryConfig("cursor-style = block")
+        let reloader = ConfigReloader()
+        defer { reloader.stop() }
+        let changes = ChangeCounter()
+        reloader.onChange = { changes.record() }
+        reloader.watch(config.loadPaths)
+        try await Task.sleep(for: .milliseconds(100))
+
+        for index in 1...3 {
+            try "cursor-style = underline\n# \(index)\n".write(
+                to: config.temporaryFile, atomically: true, encoding: .utf8)
+            try await changes.waitFor(index)
+        }
+    }
+
+    @Test func stoppingTheWatcherDropsLaterSaves() async throws {
+        let config = try TemporaryConfig("cursor-style = block")
+        let reloader = ConfigReloader()
+        let changes = ChangeCounter()
+        reloader.onChange = { changes.record() }
+        reloader.watch(config.loadPaths)
+        try await Task.sleep(for: .milliseconds(100))
+        reloader.stop()
+        try await Task.sleep(for: .milliseconds(100))
+
+        try "cursor-style = underline\n".write(to: config.temporaryFile, atomically: true, encoding: .utf8)
+        try await Task.sleep(for: .milliseconds(500))
+        let current = await MainActor.run { changes.current }
+        #expect(current == 0)
     }
 
     @Test func savingTheFileReloads() async throws {
@@ -224,6 +260,8 @@ private final class ChangeCounter: @unchecked Sendable {
     func record() {
         count += 1
     }
+
+    var current: Int { count }
 
     func waitFor(_ expected: Int) async throws {
         let deadline = Date().addingTimeInterval(5)

@@ -210,7 +210,7 @@ extension Ghostty {
                 // The candidate loaded far enough to know what it tried to
                 // read. Watch those paths too, or a file it failed to open
                 // being created later would not reload.
-                if let candidate { addWatch(candidate) }
+                if let candidate { watch(candidate, merging: true) }
                 report(rejection: rejection)
                 return nil
             }
@@ -219,18 +219,11 @@ extension Ghostty {
         /// Watch exactly what this config depends on, plus the explicit
         /// config path when one was given. GHOSTTY_CONFIG_PATH is not a
         /// default location, so the config's own path list does not contain it.
-        private func watch(_ config: Config) {
-            var paths = Set(config.loadPaths)
-            if let configPath { paths.insert(configPath) }
-            watchedPaths = paths
-            configReloader.watch(Array(watchedPaths))
-        }
-
-        /// Keep watching everything already watched and also whatever this
-        /// config tried to read. Used for a candidate that was rejected, so
-        /// the files it failed to open are noticed when they appear.
-        private func addWatch(_ config: Config) {
-            var paths = watchedPaths
+        /// Watch exactly what this config depends on, plus the explicit
+        /// config path when one was given. A rejected candidate is merged
+        /// into the current set so a file it failed to open is still noticed.
+        private func watch(_ config: Config, merging: Bool = false) {
+            var paths = merging ? watchedPaths : []
             paths.formUnion(config.loadPaths)
             if let configPath { paths.insert(configPath) }
             watchedPaths = paths

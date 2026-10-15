@@ -78,9 +78,8 @@ extension Ghostty {
             var cursor = base
             let end = base.advanced(by: Int(cString.len))
             while cursor < end, cursor.pointee != 0 {
-                let component = String(cString: cursor)
-                result.append(component)
-                cursor = cursor.advanced(by: component.utf8.count + 1)
+                result.append(String(cString: cursor))
+                cursor = cursor.advanced(by: strlen(cursor) + 1)
             }
             return result
         }

@@ -73,6 +73,7 @@ export fn ghostty_config_load_default_files(self: *Config) void {
 export fn ghostty_config_load_file(self: *Config, path: [*:0]const u8) void {
     const path_slice = std.mem.span(path);
     self.loadFile(global.alloc(), path_slice) catch |err| {
+        if (err == error.FileIsEmpty) return;
         log.err("error loading config from file path={s} err={}", .{ path_slice, err });
         recordLoadFailure(self, "error loading configuration file");
     };
@@ -173,6 +174,17 @@ export fn ghostty_config_diagnostics_count(self: *Config) u32 {
     return @intCast(self._diagnostics.items().len);
 }
 
+/// Diagnostics whose source is not a command-line argument. A bad CLI
+/// argument cannot be fixed by editing the configuration file, so a reload
+/// must not reject the file because of one.
+export fn ghostty_config_reload_diagnostics_count(self: *Config) u32 {
+    var count: u32 = 0;
+    for (self._diagnostics.items()) |diag| {
+        if (diag.location != .cli) count += 1;
+    }
+    return count;
+}
+
 export fn ghostty_config_get_diagnostic(self: *Config, idx: u32) Diagnostic {
     const items = self._diagnostics.items();
     if (idx >= items.len) return .{};
@@ -250,6 +262,72 @@ fn listedPaths(cfg: *Config) ![]const u8 {
     return ptr[0..listed.len];
 }
 
+const CliArgs = struct {
+    args: []const []const u8,
+    index: usize = 0,
+
+    pub fn next(self: *@This()) ?[]const u8 {
+        if (self.index >= self.args.len) return null;
+        defer self.index += 1;
+        return self.args[self.index];
+    }
+
+    pub fn location(self: *const @This(), _: std.mem.Allocator) error{}!?@import("../cli.zig").Location {
+        return .{ .cli = self.index };
+    }
+};
+
+test "ghostty_config_load: a bad CLI argument does not reject the file" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const path = try writeConfig(&tmp.dir, "config", "cursor-style = block\n");
+    defer alloc.free(path);
+
+    var cfg = try Config.default(alloc);
+    defer cfg.deinit();
+    ghostty_config_load_file(&cfg, path.ptr);
+    var args: CliArgs = .{ .args = &.{"--not-a-real-field=1"} };
+    try cfg.loadIter(alloc, &args);
+    ghostty_config_finalize(&cfg);
+
+    try testing.expect(!ghostty_config_load_failed(&cfg));
+    try testing.expect(ghostty_config_diagnostics_count(&cfg) > 0);
+    try testing.expectEqual(@as(u32, 0), ghostty_config_reload_diagnostics_count(&cfg));
+}
+
+test "ghostty_config_load: a file error still rejects alongside a bad CLI argument" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const path = try writeConfig(&tmp.dir, "config", "not-a-real-field = 1\n");
+    defer alloc.free(path);
+
+    var cfg = try Config.default(alloc);
+    defer cfg.deinit();
+    ghostty_config_load_file(&cfg, path.ptr);
+    var args: CliArgs = .{ .args = &.{"--also-not-real=1"} };
+    try cfg.loadIter(alloc, &args);
+    ghostty_config_finalize(&cfg);
+
+    try testing.expect(ghostty_config_reload_diagnostics_count(&cfg) > 0);
+}
+
+test "ghostty_config_load: loadFile still rejects an empty file" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const path = try writeConfig(&tmp.dir, "config", "");
+    defer alloc.free(path);
+
+    var cfg = try Config.default(alloc);
+    defer cfg.deinit();
+    try testing.expectError(error.FileIsEmpty, cfg.loadFile(alloc, path));
+}
+
 test "ghostty_config_load: empty explicit file is valid" {
     const testing = std.testing;
     const alloc = testing.allocator;
@@ -279,8 +357,11 @@ test "ghostty_config_load: empty default candidate is valid" {
 
     var cfg = try Config.default(alloc);
     defer cfg.deinit();
-    // 默认位置通过此入口读取；使用临时路径避免触碰用户配置或创建模板。
-    try testing.expectEqual(.loaded, cfg.loadOptionalFile(alloc, path));
+    // Default locations are read through this entry point. A temp path keeps
+    // the test off the user's config and away from template creation.
+    // An empty file stays .error, the baseline result loadDefaultFiles uses
+    // to decide the file exists.
+    try testing.expectEqual(.@"error", cfg.loadOptionalFile(alloc, path));
     ghostty_config_finalize(&cfg);
     try testing.expect(!ghostty_config_load_failed(&cfg));
     try testing.expectEqual(@as(u32, 0), ghostty_config_diagnostics_count(&cfg));

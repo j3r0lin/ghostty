@@ -1153,6 +1153,7 @@ GHOSTTY_API ghostty_input_trigger_s ghostty_config_trigger(ghostty_config_t,
 GHOSTTY_API bool ghostty_config_key_is_binding(ghostty_config_t, ghostty_input_key_s);
 GHOSTTY_API uint32_t ghostty_config_diagnostics_count(ghostty_config_t);
 GHOSTTY_API ghostty_diagnostic_s ghostty_config_get_diagnostic(ghostty_config_t, uint32_t);
+GHOSTTY_API uint32_t ghostty_config_reload_diagnostics_count(ghostty_config_t);
 GHOSTTY_API bool ghostty_config_load_failed(ghostty_config_t);
 // NUL-separated, NUL-terminated list of the files and directories this
 // configuration was loaded from. Owned by the caller; free with
