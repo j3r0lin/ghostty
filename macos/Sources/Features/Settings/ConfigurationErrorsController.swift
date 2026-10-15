@@ -9,6 +9,14 @@ class ConfigurationErrorsController: NSWindowController, NSWindowDelegate, Confi
 
     override var windowNibName: NSNib.Name? { "ConfigurationErrors" }
 
+    /// What the window is reporting. A rejection means the running
+    /// configuration was kept; diagnostics mean the configuration was
+    /// applied with the offending lines skipped.
+    enum Notice: Equatable {
+        case diagnostics
+        case rejected
+    }
+
     /// The data model for this view. Update this directly and the associated view will be updated, too.
     @Published var errors: [String] = [] {
         didSet {
@@ -23,6 +31,24 @@ class ConfigurationErrorsController: NSWindowController, NSWindowDelegate, Confi
                     self.window?.performClose(nil)
                 }
             }
+        }
+    }
+
+    @Published var notice: Notice = .diagnostics
+
+    /// Show a reload that was refused. The running configuration is unchanged.
+    func present(_ rejection: Ghostty.Config.Rejection) {
+        let messages: [String]
+        switch rejection {
+        case .invalid(let diagnostics), .unloadable(let diagnostics):
+            messages = diagnostics
+        }
+        notice = .rejected
+        errors = messages.isEmpty
+            ? ["The configuration could not be loaded, so the running configuration was kept."]
+            : messages
+        if window == nil || !window!.isVisible {
+            showWindow(nil)
         }
     }
 

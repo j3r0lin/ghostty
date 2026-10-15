@@ -29,6 +29,17 @@ extension Ghostty {
 
         /// Preferred config file than the default ones
         private var configPath: String?
+
+        /// Watches the files the running configuration was loaded from and
+        /// reloads when they change. A rejected reload keeps the previous
+        /// configuration, but the watch grows to cover whatever the rejected
+        /// candidate tried to read, so fixing that file reloads.
+        private let configReloader = ConfigReloader()
+
+        /// Paths currently watched. Kept so a rejected candidate can add its
+        /// own paths without dropping the ones already watched.
+        private var watchedPaths: Set<String> = []
+
         /// The ghostty app instance. We only have one of these for the entire app, although I guess
         /// in theory you can have multiple... I don't know why you would...
         @Published var app: ghostty_app_t? {
@@ -53,6 +64,9 @@ extension Ghostty {
             self.configPath = configPath
             // Initialize the global configuration.
             self.config = Config(at: configPath)
+            self.configReloader.onChange = { [weak self] in
+                self?.reloadConfig()
+            }
             if self.config.config == nil {
                 readiness = .error
                 return
@@ -111,6 +125,9 @@ extension Ghostty {
                 name: NSApplication.didResignActiveNotification,
                 object: nil)
             self.readiness = .ready
+            // Only once the app exists can a reload apply anything, so this
+            // is the earliest point watching is useful.
+            self.watch(self.config)
         }
 
         deinit {
@@ -146,6 +163,13 @@ extension Ghostty {
         }
 
         /// Reload the configuration.
+        ///
+        /// A hard reload loads a candidate and applies it only when it loaded
+        /// cleanly. Any diagnostic or outright load failure leaves the running
+        /// configuration in place and reports the rejection instead; the
+        /// candidate is never published, so nothing observes a config change.
+        /// A soft reload reapplies the running configuration and does not
+        /// touch the files.
         func reloadConfig(soft: Bool = false) {
             guard let app = self.app else { return }
 
@@ -155,15 +179,8 @@ extension Ghostty {
                 return
             }
 
-            // Hard or full updates have to reload the full configuration
-            let newConfig = Config(at: configPath)
-            guard newConfig.loaded else {
-                Ghostty.logger.warning("failed to reload configuration")
-                return
-            }
-
-            ghostty_app_update_config(app, newConfig.config!)
-            /// applied config will be updated in ``Self.configChange(_:target:v:)``
+            guard let candidate = loadCandidateConfig() else { return }
+            ghostty_app_update_config(app, candidate.config!)
         }
 
         func reloadConfig(surface: ghostty_surface_t, soft: Bool = false) {
@@ -175,14 +192,56 @@ extension Ghostty {
 
             // Hard or full updates have to reload the full configuration.
             // NOTE: We never set this on self.config because this is a surface-only
-            // config. We free it after the call.
-            let newConfig = Config(at: configPath)
-            guard newConfig.loaded else {
-                Ghostty.logger.warning("failed to reload configuration")
-                return
-            }
+            // config. We free it after the call. It is held to the same
+            // standard as an app reload: a broken candidate is not applied.
+            guard let candidate = loadCandidateConfig() else { return }
+            ghostty_surface_update_config(surface, candidate.config!)
+        }
 
-            ghostty_surface_update_config(surface, newConfig.config!)
+        /// Load the configuration and decide whether it may be applied.
+        /// A rejection is reported and leaves the running configuration
+        /// untouched; nil means exactly that.
+        private func loadCandidateConfig() -> Config? {
+            switch Config.verdict(at: configPath) {
+            case .accept(let candidate):
+                return candidate
+            case .reject(let rejection, let candidate):
+                Ghostty.logger.warning("refusing to reload configuration")
+                // The candidate loaded far enough to know what it tried to
+                // read. Watch those paths too, or a file it failed to open
+                // being created later would not reload.
+                if let candidate { addWatch(candidate) }
+                report(rejection: rejection)
+                return nil
+            }
+        }
+
+        /// Watch exactly what this config depends on, plus the explicit
+        /// config path when one was given. GHOSTTY_CONFIG_PATH is not a
+        /// default location, so the config's own path list does not contain it.
+        private func watch(_ config: Config) {
+            var paths = Set(config.loadPaths)
+            if let configPath { paths.insert(configPath) }
+            watchedPaths = paths
+            configReloader.watch(Array(watchedPaths))
+        }
+
+        /// Keep watching everything already watched and also whatever this
+        /// config tried to read. Used for a candidate that was rejected, so
+        /// the files it failed to open are noticed when they appear.
+        private func addWatch(_ config: Config) {
+            var paths = watchedPaths
+            paths.formUnion(config.loadPaths)
+            if let configPath { paths.insert(configPath) }
+            watchedPaths = paths
+            configReloader.watch(Array(watchedPaths))
+        }
+
+        private func report(rejection: Ghostty.Config.Rejection) {
+            DispatchQueue.main.async {
+                let controller = ConfigurationErrorsController.sharedInstance
+                controller.present(rejection)
+            }
         }
 
         /// Request that the given surface is closed. This will trigger the full normal surface close event
@@ -2440,6 +2499,8 @@ extension Ghostty {
                     guard let app_ud = ghostty_app_userdata(app) else { return }
                     let ghostty = Unmanaged<App>.fromOpaque(app_ud).takeUnretainedValue()
                     ghostty.config = config
+                    // The clone carries the files this config was loaded from.
+                    ghostty.watch(config)
 
                     return
 

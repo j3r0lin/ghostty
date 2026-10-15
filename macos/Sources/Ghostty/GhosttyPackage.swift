@@ -71,6 +71,20 @@ extension Ghostty {
             return String(data: data, encoding: .utf8) ?? ""
         }
 
+        /// Split a buffer of NUL-separated, NUL-terminated strings.
+        var components: [String] {
+            guard let base = cString.ptr else { return [] }
+            var result: [String] = []
+            var cursor = base
+            let end = base.advanced(by: Int(cString.len))
+            while cursor < end, cursor.pointee != 0 {
+                let component = String(cString: cursor)
+                result.append(component)
+                cursor = cursor.advanced(by: component.utf8.count + 1)
+            }
+            return result
+        }
+
         deinit {
             ghostty_string_free(cString)
         }

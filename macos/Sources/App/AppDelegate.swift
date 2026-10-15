@@ -864,8 +864,11 @@ class AppDelegate: NSObject,
             NSApp.setActivationPolicy(.accessory)
         }
 
-        // If we have configuration errors, we need to show them.
+        // If we have configuration errors, we need to show them. Reaching
+        // this callback means the configuration was applied, so these are
+        // lines that were skipped rather than a reload that was refused.
         let c = ConfigurationErrorsController.sharedInstance
+        c.notice = .diagnostics
         c.errors = config.errors
         if c.errors.count > 0 {
             if c.window == nil || !c.window!.isVisible {

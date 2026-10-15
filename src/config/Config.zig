@@ -3957,6 +3957,18 @@ _arena: ?ArenaAllocator = null,
 /// the configuration.
 _diagnostics: cli.DiagnosticList = .{},
 
+/// Set when a load or finalize step failed outright rather than
+/// producing a per-line diagnostic. A config with this set must not
+/// replace one that is already in effect: the failure means the
+/// result is missing input, not just a bad line.
+_load_failed: bool = false,
+
+/// Every path a load touched: files read, files that failed to open,
+/// and the default locations checked. A reload watches these so a file
+/// that appears or is fixed later is noticed. `loadTheme` rebuilds the
+/// config, so this has to be repopulated there rather than copied.
+_load_paths: std.ArrayList([:0]const u8) = .empty,
+
 /// The conditional truths for the configuration. This is used to
 /// determine if a conditional configuration matches or not.
 _conditional_state: conditional.State = .{},
@@ -4042,7 +4054,11 @@ pub fn loadIter(
 /// `path` must be resolved and absolute.
 pub fn loadFile(self: *Config, alloc: Allocator, path: []const u8) !void {
     assert(std.fs.path.isAbsolute(path));
+    // Record before opening: a file that fails to open is exactly one a
+    // later reload needs to notice being fixed or created.
+    try self.noteLoadPath(path);
     var file = file_load.open(global.io(), path) catch |err| switch (err) {
+        error.FileIsEmpty => return,
         error.NotAFile => {
             log.warn(
                 "config-file {s}: not reading because it is not a file",
@@ -4142,6 +4158,8 @@ pub fn loadOptionalFile(
     } else |err| switch (err) {
         error.FileNotFound => return .not_found,
         else => {
+            // 可选文件的读取错误不会向上传递，重载仍需保留失败状态。
+            self._load_failed = true;
             std.log.warn(
                 "error reading optional config file, not loading err={} path={s}",
                 .{ err, path },
@@ -4218,7 +4236,13 @@ pub fn loadDefaultFiles(self: *Config, alloc: Allocator) !void {
             )) self.loadOptionalFile(
                 alloc,
                 app_support_path,
-            ) else .not_found;
+            ) else action: {
+                // loadOptionalFile records the path it checks. Skipping the
+                // second load must not skip the record, or a reload would
+                // not notice this file being replaced.
+                try self.noteLoadPath(app_support_path);
+                break :action .not_found;
+            };
 
             if (app_support_action != .not_found and legacy_app_support_action != .not_found) {
                 log.warn(
@@ -4417,6 +4441,8 @@ pub fn loadRecursiveFiles(self: *Config, alloc_gpa: Allocator) !void {
             continue;
         }
 
+        // Record even when the open fails: the file may be created later.
+        try self.noteLoadPath(path);
         var file = std.Io.Dir.openFileAbsolute(global.io(), path, .{}) catch |err| {
             if (err != error.FileNotFound or !optional) {
                 const diag: cli.Diagnostic = .{
@@ -4677,9 +4703,27 @@ fn loadTheme(self: *Config, theme: Theme) !void {
     var slice_it = Replay.iterator(self._replay_steps.items, &new_config);
     try new_config.loadIter(alloc_gpa, &slice_it);
 
+    // The replay parses steps instead of opening files, so it never
+    // repopulates the paths the load recorded. Carry them over, and add
+    // the theme file, before the old config is freed.
+    new_config._load_failed = self._load_failed;
+    for (self._load_paths.items) |recorded| try new_config.noteLoadPath(recorded);
+    try new_config.noteLoadPath(path);
+
     // Success, swap our new config in and free the old.
     self.deinit();
     self.* = new_config;
+}
+
+/// Remember a path this load depends on. Duplicates are skipped so
+/// recursive loads can record the same file twice without growing
+/// the list.
+fn noteLoadPath(self: *Config, path: []const u8) Allocator.Error!void {
+    for (self._load_paths.items) |recorded| {
+        if (std.mem.eql(u8, recorded, path)) return;
+    }
+    const alloc = self._arena.?.allocator();
+    try self._load_paths.append(alloc, try alloc.dupeZ(u8, path));
 }
 
 /// Call this once after you are done setting configuration. This
@@ -5159,8 +5203,13 @@ pub fn clone(
         );
     }
 
-    // Copy our diagnostics
+    // Copy our diagnostics and whether a load step failed outright.
     result._diagnostics = try self._diagnostics.clone(alloc_arena);
+    result._load_failed = self._load_failed;
+    try result._load_paths.ensureTotalCapacity(alloc_arena, self._load_paths.items.len);
+    for (self._load_paths.items) |path| {
+        result._load_paths.appendAssumeCapacity(try alloc_arena.dupeZ(u8, path));
+    }
 
     // Preserve our replay steps. We copy them exactly to also preserve
     // the exact conditionals required for some steps.

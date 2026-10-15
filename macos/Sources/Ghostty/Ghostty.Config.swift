@@ -18,6 +18,22 @@ extension Ghostty {
         /// True if the configuration is loaded
         var loaded: Bool { config != nil }
 
+        /// True when a load or finalize step failed outright, as opposed to a
+        /// diagnostic about a single line. A config in this state is missing
+        /// input and must not replace one that is already in effect.
+        var loadFailed: Bool {
+            guard let cfg = self.config else { return true }
+            return ghostty_config_load_failed(cfg)
+        }
+
+        /// The files and directories this configuration was loaded from, in
+        /// the order the library reports them. A directory stands in for a
+        /// default location whose file does not exist yet.
+        var loadPaths: [String] {
+            guard let cfg = self.config else { return [] }
+            return Ghostty.AllocatedString(ghostty_config_load_paths(cfg)).components
+        }
+
         /// Return the errors found while loading the configuration.
         var errors: [String] {
             guard let cfg = self.config else { return [] }
@@ -57,6 +73,48 @@ extension Ghostty {
         /// - Parameters:
         ///   - path: An optional preferred config file path. Pass `nil` to load the default configuration files.
         ///   - finalize: Whether to finalize the configuration to populate default values.
+        /// Why a freshly loaded configuration was not applied.
+        enum Rejection: Equatable {
+            /// The configuration describes itself, but a value in it is wrong.
+            /// The running configuration is left untouched.
+            case invalid([String])
+            /// The configuration could not be loaded or finalized at all, so
+            /// there is nothing trustworthy to apply.
+            case unloadable([String])
+        }
+
+        /// Whether a freshly loaded configuration may replace the running one.
+        /// Not a Result: a rejection still carries the configuration the load
+        /// produced, and that configuration holds the paths the load tried to
+        /// read, which a reload keeps watching so the file can be fixed.
+        enum Verdict {
+            case accept(Config)
+            case reject(Rejection, Config?)
+        }
+
+        static func verdict(at path: String?) -> Verdict {
+            let candidate = Config(at: path)
+            guard candidate.loaded else { return .reject(.unloadable([]), nil) }
+            if let rejection = candidate.rejection() {
+                return .reject(rejection, candidate)
+            }
+            return .accept(candidate)
+        }
+
+        /// Whether this configuration may replace one that is already running.
+        /// Any diagnostic or outright load failure rejects it: a reload
+        /// either applies the whole file or none of it.
+        func rejection() -> Rejection? {
+            if loadFailed {
+                return .unloadable(errors)
+            }
+            let diagnostics = errors
+            if !diagnostics.isEmpty {
+                return .invalid(diagnostics)
+            }
+            return nil
+        }
+
         static func loadConfig(at path: String?, finalize: Bool) -> ghostty_config_t? {
             // Initialize the global configuration.
             guard let cfg = ghostty_config_new() else {

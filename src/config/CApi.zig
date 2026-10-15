@@ -54,6 +54,7 @@ export fn ghostty_config_clone(self: *Config) ?*Config {
 export fn ghostty_config_load_cli_args(self: *Config) void {
     self.loadCliArgs(global.alloc()) catch |err| {
         log.err("error loading config err={}", .{err});
+        recordLoadFailure(self, "error loading config from CLI arguments");
     };
 }
 
@@ -63,6 +64,7 @@ export fn ghostty_config_load_cli_args(self: *Config) void {
 export fn ghostty_config_load_default_files(self: *Config) void {
     self.loadDefaultFiles(global.alloc()) catch |err| {
         log.err("error loading config err={}", .{err});
+        recordLoadFailure(self, "error loading the default configuration files");
     };
 }
 
@@ -72,6 +74,7 @@ export fn ghostty_config_load_file(self: *Config, path: [*:0]const u8) void {
     const path_slice = std.mem.span(path);
     self.loadFile(global.alloc(), path_slice) catch |err| {
         log.err("error loading config from file path={s} err={}", .{ path_slice, err });
+        recordLoadFailure(self, "error loading configuration file");
     };
 }
 
@@ -81,13 +84,58 @@ export fn ghostty_config_load_file(self: *Config, path: [*:0]const u8) void {
 export fn ghostty_config_load_recursive_files(self: *Config) void {
     self.loadRecursiveFiles(global.alloc()) catch |err| {
         log.err("error loading config err={}", .{err});
+        recordLoadFailure(self, "error loading referenced configuration files");
     };
 }
 
 export fn ghostty_config_finalize(self: *Config) void {
     self.finalize() catch |err| {
         log.err("error finalizing config err={}", .{err});
+        recordLoadFailure(self, "error finalizing the configuration");
     };
+}
+
+/// True when a load or finalize step failed outright, as opposed to a
+/// recoverable per-line diagnostic. Such a config must not replace a
+/// config that is already in effect.
+export fn ghostty_config_load_failed(self: *Config) bool {
+    return self._load_failed;
+}
+
+/// The paths this configuration was actually loaded from, including files
+/// that failed to open and the default locations that were checked. The
+/// returned buffer is owned by the caller and freed with ghostty_string_free.
+export fn ghostty_config_load_paths(self: *Config) String {
+    return loadPaths(self) catch |err| {
+        log.err("error collecting config load paths err={}", .{err});
+        return .empty;
+    };
+}
+
+/// Remember that a load step failed. The existing void load API cannot
+/// report the error, so it is recorded as a diagnostic and a sticky flag
+/// that a reload can check before applying the config.
+fn recordLoadFailure(self: *Config, comptime message: [:0]const u8) void {
+    self._load_failed = true;
+    const arena = &(self._arena orelse return);
+    self._diagnostics.append(arena.allocator(), .{ .message = message }) catch |err| {
+        log.err("error recording config load failure err={}", .{err});
+    };
+}
+
+fn loadPaths(self: *Config) !String {
+    var arena: std.heap.ArenaAllocator = .init(global.alloc());
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var joined: std.ArrayList(u8) = .empty;
+    for (self._load_paths.items, 0..) |path, i| {
+        if (i > 0) try joined.append(alloc, 0);
+        try joined.appendSlice(alloc, path);
+    }
+
+    const owned = try global.alloc().dupeZ(u8, joined.items);
+    return .fromSlice(owned);
 }
 
 export fn ghostty_config_get(
@@ -186,6 +234,233 @@ test "ghostty_config_get: optional null returns false" {
     var out: Config.Color.C = undefined;
     const key = "unfocused-split-fill";
     try testing.expect(!ghostty_config_get(&cfg, @ptrCast(&out), key, key.len));
+}
+
+fn writeConfig(dir: *std.Io.Dir, name: []const u8, data: []const u8) ![:0]const u8 {
+    const alloc = std.testing.allocator;
+    try dir.writeFile(global.io(), .{ .sub_path = name, .data = data });
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    const len = try dir.realPathFile(global.io(), name, &buf);
+    return try alloc.dupeZ(u8, buf[0..len]);
+}
+
+fn listedPaths(cfg: *Config) ![]const u8 {
+    const listed = try loadPaths(cfg);
+    const ptr = listed.ptr orelse return "";
+    return ptr[0..listed.len];
+}
+
+test "ghostty_config_load: empty explicit file is valid" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const path = try writeConfig(&tmp.dir, "config", "");
+    defer alloc.free(path);
+
+    var cfg = try Config.default(alloc);
+    defer cfg.deinit();
+    ghostty_config_load_file(&cfg, path.ptr);
+    ghostty_config_finalize(&cfg);
+    try testing.expect(!ghostty_config_load_failed(&cfg));
+    try testing.expectEqual(@as(u32, 0), ghostty_config_diagnostics_count(&cfg));
+    const flat = try listedPaths(&cfg);
+    defer alloc.free(flat.ptr[0 .. flat.len + 1]);
+    try testing.expect(std.mem.indexOf(u8, flat, path) != null);
+}
+
+test "ghostty_config_load: empty default candidate is valid" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const path = try writeConfig(&tmp.dir, "config.ghostty", "");
+    defer alloc.free(path);
+
+    var cfg = try Config.default(alloc);
+    defer cfg.deinit();
+    // 默认位置通过此入口读取；使用临时路径避免触碰用户配置或创建模板。
+    try testing.expectEqual(.loaded, cfg.loadOptionalFile(alloc, path));
+    ghostty_config_finalize(&cfg);
+    try testing.expect(!ghostty_config_load_failed(&cfg));
+    try testing.expectEqual(@as(u32, 0), ghostty_config_diagnostics_count(&cfg));
+    const flat = try listedPaths(&cfg);
+    defer alloc.free(flat.ptr[0 .. flat.len + 1]);
+    try testing.expect(std.mem.indexOf(u8, flat, path) != null);
+    const file = try std.Io.Dir.openFileAbsolute(global.io(), path, .{});
+    defer file.close(global.io());
+    try testing.expectEqual(@as(u64, 0), (try file.stat(global.io())).size);
+}
+
+test "ghostty_config_load: empty referenced file is valid" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const extra = try writeConfig(&tmp.dir, "extra", "");
+    defer alloc.free(extra);
+    const text = try std.fmt.allocPrint(alloc, "config-file = {s}\n", .{extra});
+    defer alloc.free(text);
+    const root = try writeConfig(&tmp.dir, "config", text);
+    defer alloc.free(root);
+
+    var cfg = try Config.default(alloc);
+    defer cfg.deinit();
+    ghostty_config_load_file(&cfg, root.ptr);
+    ghostty_config_load_recursive_files(&cfg);
+    ghostty_config_finalize(&cfg);
+    try testing.expect(!ghostty_config_load_failed(&cfg));
+    try testing.expectEqual(@as(u32, 0), ghostty_config_diagnostics_count(&cfg));
+    const flat = try listedPaths(&cfg);
+    defer alloc.free(flat.ptr[0 .. flat.len + 1]);
+    try testing.expect(std.mem.indexOf(u8, flat, extra) != null);
+}
+
+test "ghostty_config_load_paths: records the files actually opened" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const extra = try writeConfig(&tmp.dir, "extra", "cursor-style = block\n");
+    defer alloc.free(extra);
+    const theme = try writeConfig(&tmp.dir, "theme", "background = #111111\n");
+    defer alloc.free(theme);
+    const text = try std.fmt.allocPrint(alloc, "config-file = {s}\ntheme = {s}\n", .{ extra, theme });
+    defer alloc.free(text);
+    const root = try writeConfig(&tmp.dir, "config", text);
+    defer alloc.free(root);
+
+    var cfg = try Config.default(alloc);
+    defer cfg.deinit();
+    try cfg.loadFile(alloc, root);
+    try cfg.loadRecursiveFiles(alloc);
+    try cfg.finalize();
+    try testing.expect(!cfg._load_failed);
+
+    const flat = try listedPaths(&cfg);
+    defer if (flat.len > 0) alloc.free(flat.ptr[0 .. flat.len + 1]);
+    // The theme path is recorded before loadTheme replaces the config, so
+    // this also pins that the replacement keeps what the load recorded.
+    try testing.expect(std.mem.indexOf(u8, flat, root) != null);
+    try testing.expect(std.mem.indexOf(u8, flat, extra) != null);
+    try testing.expect(std.mem.indexOf(u8, flat, theme) != null);
+
+    var cloned = try cfg.clone(alloc);
+    defer cloned.deinit();
+    const cloned_flat = try listedPaths(&cloned);
+    defer if (cloned_flat.len > 0) alloc.free(cloned_flat.ptr[0 .. cloned_flat.len + 1]);
+    try testing.expect(std.mem.indexOf(u8, cloned_flat, theme) != null);
+}
+
+test "ghostty_config_load_paths: an optional file is recorded even when absent" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir_len = try tmp.dir.realPathFile(global.io(), ".", &dir_buf);
+    const absent = try std.fs.path.join(alloc, &.{ dir_buf[0..dir_len], "absent" });
+    defer alloc.free(absent);
+
+    var cfg = try Config.default(alloc);
+    defer cfg.deinit();
+    // loadDefaultFiles checks its candidates through loadOptionalFile, so
+    // this is the path those checks record.
+    try testing.expectEqual(.not_found, cfg.loadOptionalFile(alloc, absent));
+    try testing.expect(!cfg._load_failed);
+
+    const flat = try listedPaths(&cfg);
+    defer if (flat.len > 0) alloc.free(flat.ptr[0 .. flat.len + 1]);
+    try testing.expect(std.mem.indexOf(u8, flat, absent) != null);
+}
+
+test "ghostty_config_load_failed: an optional file that fails to open is a failure" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.symLink(global.io(), "loop", "loop", .{});
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir_len = try tmp.dir.realPathFile(global.io(), ".", &dir_buf);
+    const loop = try std.fs.path.join(alloc, &.{ dir_buf[0..dir_len], "loop" });
+    defer alloc.free(loop);
+
+    var cfg = try Config.default(alloc);
+    defer cfg.deinit();
+    // file_load.open maps every open error other than FileNotFound to
+    // FileOpenFailed, and loadOptionalFile must record that as a failure.
+    // A symlink pointing at itself is one such error.
+    try testing.expectEqual(.@"error", cfg.loadOptionalFile(alloc, loop));
+    try testing.expect(cfg._load_failed);
+
+    const flat = try listedPaths(&cfg);
+    defer if (flat.len > 0) alloc.free(flat.ptr[0 .. flat.len + 1]);
+    try testing.expect(std.mem.indexOf(u8, flat, loop) != null);
+}
+
+test "ghostty_config_load_paths: a missing referenced file is still recorded" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir_len = try tmp.dir.realPathFile(global.io(), ".", &dir_buf);
+    const missing = try std.fs.path.join(alloc, &.{ dir_buf[0..dir_len], "extra" });
+    defer alloc.free(missing);
+    const text = try std.fmt.allocPrint(alloc, "config-file = {s}\n", .{missing});
+    defer alloc.free(text);
+    const root = try writeConfig(&tmp.dir, "config", text);
+    defer alloc.free(root);
+
+    var cfg = try Config.default(alloc);
+    defer cfg.deinit();
+    try cfg.loadFile(alloc, root);
+    try cfg.loadRecursiveFiles(alloc);
+
+    const flat = try listedPaths(&cfg);
+    defer if (flat.len > 0) alloc.free(flat.ptr[0 .. flat.len + 1]);
+    try testing.expect(std.mem.indexOf(u8, flat, missing) != null);
+}
+
+test "ghostty_config_load_failed: theme finalization keeps the failure" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const theme = try writeConfig(&tmp.dir, "theme", "background = #111111\n");
+    defer alloc.free(theme);
+    const text = try std.fmt.allocPrint(alloc, "theme = {s}\n", .{theme});
+    defer alloc.free(text);
+    const root = try writeConfig(&tmp.dir, "config", text);
+    defer alloc.free(root);
+
+    var cfg = try Config.default(alloc);
+    defer cfg.deinit();
+    try cfg.loadFile(alloc, root);
+    // A failure recorded before finalize must outlive the config rebuild
+    // loadTheme does, since that rebuild is what a reload then inspects.
+    recordLoadFailure(&cfg, "error loading configuration file");
+    try cfg.finalize();
+    try testing.expect(cfg._load_failed);
+}
+
+test "ghostty_config_load_failed: a failed load is recorded" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+    var cfg = try Config.default(alloc);
+    defer cfg.deinit();
+
+    try testing.expect(!ghostty_config_load_failed(&cfg));
+    // Drive the recording directly. The exported load functions log the
+    // underlying error first, and the test runner counts every error log
+    // as a failure no matter what the test does with the log level.
+    recordLoadFailure(&cfg, "error loading configuration file");
+    try testing.expect(ghostty_config_load_failed(&cfg));
+    try testing.expect(!cfg._diagnostics.empty());
+
+    var cloned = try cfg.clone(alloc);
+    defer cloned.deinit();
+    try testing.expect(cloned._load_failed);
 }
 
 test "ghostty_config_get: unknown key returns false" {

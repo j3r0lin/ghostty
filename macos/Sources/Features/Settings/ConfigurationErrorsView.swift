@@ -2,6 +2,7 @@ import SwiftUI
 
 protocol ConfigurationErrorsViewModel: ObservableObject {
     var errors: [String] { get set }
+    var notice: ConfigurationErrorsController.Notice { get }
 }
 
 struct ConfigurationErrorsView<ViewModel: ConfigurationErrorsViewModel>: View {
@@ -16,10 +17,7 @@ struct ConfigurationErrorsView<ViewModel: ConfigurationErrorsViewModel>: View {
                     .padding()
                     .frame(alignment: .center)
 
-                Text("""
-                    ^[\(model.errors.count) error(s) were](inflect: true) found while loading the configuration. \
-                    Please review the errors below and reload your configuration or ignore the erroneous lines.
-                    """)
+                Text(summary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding()
             }
@@ -54,6 +52,24 @@ struct ConfigurationErrorsView<ViewModel: ConfigurationErrorsViewModel>: View {
             .padding([.bottom, .trailing])
         }
         .frame(minWidth: 480, maxWidth: 960, minHeight: 270)
+    }
+
+    /// Diagnostics describe a configuration that loaded while skipping the
+    /// broken lines. A rejection describes one that was not loaded at all,
+    /// leaving the running configuration exactly as it was.
+    private var summary: String {
+        switch model.notice {
+        case .diagnostics:
+            return """
+                ^[\(model.errors.count) error(s) were](inflect: true) found while loading the configuration. \
+                Please review the errors below and reload your configuration or ignore the erroneous lines.
+                """
+        case .rejected:
+            return """
+                ^[\(model.errors.count) error(s)](inflect: true) kept this configuration from loading. \
+                Nothing was changed. Fix the errors below and the configuration will reload on its own.
+                """
+        }
     }
 
     private func reloadConfig() {
