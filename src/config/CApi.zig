@@ -119,8 +119,16 @@ export fn ghostty_config_load_paths(self: *Config) String {
 fn recordLoadFailure(self: *Config, comptime message: [:0]const u8) void {
     self._load_failed = true;
     const arena = &(self._arena orelse return);
-    self._diagnostics.append(arena.allocator(), .{ .message = message }) catch |err| {
+    const alloc = arena.allocator();
+    const diag: @import("../cli.zig").Diagnostic = .{ .message = message };
+    self._diagnostics.append(alloc, diag) catch |err| {
         log.err("error recording config load failure err={}", .{err});
+        return;
+    };
+    // Theme replay rebuilds diagnostics from the replay steps, so one that
+    // is not recorded there disappears from the error window.
+    self._replay_steps.append(alloc, .{ .diagnostic = diag }) catch |err| {
+        log.err("error replaying config load failure err={}", .{err});
     };
 }
 
@@ -276,6 +284,52 @@ const CliArgs = struct {
         return .{ .cli = self.index };
     }
 };
+
+test "ghostty_config_load: a theme replay keeps a bad CLI argument as CLI" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const theme = try writeConfig(&tmp.dir, "theme", "background = #111111\n");
+    defer alloc.free(theme);
+    const text = try std.fmt.allocPrint(alloc, "theme = {s}\n", .{theme});
+    defer alloc.free(text);
+    const path = try writeConfig(&tmp.dir, "config", text);
+    defer alloc.free(path);
+
+    var cfg = try Config.default(alloc);
+    defer cfg.deinit();
+    ghostty_config_load_file(&cfg, path.ptr);
+    var args: CliArgs = .{ .args = &.{"--not-a-real-field=1"} };
+    try cfg.loadIter(alloc, &args);
+    ghostty_config_finalize(&cfg);
+
+    try testing.expect(!ghostty_config_load_failed(&cfg));
+    try testing.expect(ghostty_config_diagnostics_count(&cfg) > 0);
+    try testing.expectEqual(@as(u32, 0), ghostty_config_reload_diagnostics_count(&cfg));
+}
+
+test "ghostty_config_load: a theme replay still counts a file error" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const theme = try writeConfig(&tmp.dir, "theme", "background = #111111\n");
+    defer alloc.free(theme);
+    const text = try std.fmt.allocPrint(alloc, "theme = {s}\nnot-a-real-field = 1\n", .{theme});
+    defer alloc.free(text);
+    const path = try writeConfig(&tmp.dir, "config", text);
+    defer alloc.free(path);
+
+    var cfg = try Config.default(alloc);
+    defer cfg.deinit();
+    ghostty_config_load_file(&cfg, path.ptr);
+    var args: CliArgs = .{ .args = &.{"--also-not-real=1"} };
+    try cfg.loadIter(alloc, &args);
+    ghostty_config_finalize(&cfg);
+
+    try testing.expect(ghostty_config_reload_diagnostics_count(&cfg) > 0);
+}
 
 test "ghostty_config_load: a bad CLI argument does not reject the file" {
     const testing = std.testing;

@@ -56,11 +56,11 @@ final class ConfigReloader {
     }
 
     deinit {
+        // The cancel handler closes the descriptor. Closing it here as well
+        // would close it twice, and the second close can hit a descriptor
+        // number that has since been reused.
         for source in sources.values {
             source.cancel()
-        }
-        for descriptor in descriptors.values {
-            close(descriptor)
         }
     }
 

@@ -155,6 +155,19 @@ struct ConfigReloadTests {
         }
     }
 
+    @Test func releasingTheWatcherClosesItsDescriptors() async throws {
+        let config = try TemporaryConfig("cursor-style = block")
+        let watched = config.temporaryFile.resolvingSymlinksInPath().path()
+        do {
+            let reloader = ConfigReloader()
+            reloader.watch(config.loadPaths)
+            try await Task.sleep(for: .milliseconds(200))
+            #expect(descriptors(of: watched) > 0)
+        }
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(descriptors(of: watched) == 0)
+    }
+
     @Test func stoppingTheWatcherDropsLaterSaves() async throws {
         let config = try TemporaryConfig("cursor-style = block")
         let reloader = ConfigReloader()
@@ -250,6 +263,19 @@ struct ConfigReloadTests {
         }
         reloader.stop()
     }
+}
+
+/// How many descriptors this process holds open for one path. Other tests
+/// open and close files in the same process, so only descriptors pointing at
+/// this test's own file say anything about the watcher.
+private func descriptors(of watched: String) -> Int {
+    var buffer = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+    var count = 0
+    for descriptor in Int32(0)..<Int32(getdtablesize()) where fcntl(descriptor, F_GETPATH, &buffer) >= 0 {
+        let path = URL(fileURLWithPath: String(cString: buffer)).resolvingSymlinksInPath().path()
+        if path == watched { count += 1 }
+    }
+    return count
 }
 
 /// Counts reload reports. The reloader delivers them on the main queue,

@@ -4314,7 +4314,7 @@ pub fn loadCliArgs(self: *Config, alloc_gpa: Allocator) !void {
             for (args) |arg_raw| {
                 const arg = std.mem.sliceTo(arg_raw, 0);
                 const copy = try arena_alloc.dupeZ(u8, arg);
-                try self._replay_steps.append(arena_alloc, .{ .arg = copy });
+                try self._replay_steps.append(arena_alloc, .{ .arg = .{ .value = copy } });
                 try builder.append(arena_alloc, copy);
             }
 
@@ -4678,7 +4678,8 @@ fn loadTheme(self: *Config, theme: Theme) !void {
                 };
                 item.* = .{ .conditional_arg = .{
                     .conditions = conds,
-                    .arg = v,
+                    .arg = v.value,
+                    .location = v.location,
                 } };
             },
 
@@ -4694,6 +4695,7 @@ fn loadTheme(self: *Config, theme: Theme) !void {
                 item.* = .{ .conditional_arg = .{
                     .conditions = conds,
                     .arg = v.arg,
+                    .location = v.location,
                 } };
             },
         }
@@ -4958,7 +4960,10 @@ pub fn parseManuallyHook(
 
         while (iter.next()) |param| {
             const copy = try alloc.dupeZ(u8, param);
-            try self._replay_steps.append(alloc, .{ .arg = copy });
+            try self._replay_steps.append(alloc, .{ .arg = .{
+                .value = copy,
+                .location = try cli.Location.fromIter(iter, alloc),
+            } });
             try command.append(alloc, copy);
         }
 
@@ -4992,7 +4997,10 @@ pub fn parseManuallyHook(
     // Keep track of our input args for replay
     try self._replay_steps.append(
         alloc,
-        .{ .arg = try alloc.dupeZ(u8, arg) },
+        .{ .arg = .{
+            .value = try alloc.dupeZ(u8, arg),
+            .location = try cli.Location.fromIter(iter, alloc),
+        } },
     );
 
     // If we didn't find a special case, continue parsing normally
@@ -5373,7 +5381,12 @@ fn probableCliEnvironment() bool {
 const Replay = struct {
     const Step = union(enum) {
         /// An argument to parse as if it came from the CLI or file.
-        arg: [:0]const u8,
+        /// `location` is where it was first parsed, so a replay reproduces
+        /// diagnostics with the same origin.
+        arg: struct {
+            value: [:0]const u8,
+            location: cli.Location = .none,
+        },
 
         /// A base path to expand relative paths against.
         expand: []const u8,
@@ -5384,6 +5397,7 @@ const Replay = struct {
         conditional_arg: struct {
             conditions: []const Conditional,
             arg: []const u8,
+            location: cli.Location = .none,
         },
 
         /// A diagnostic to be added to the new configuration when
@@ -5413,7 +5427,10 @@ const Replay = struct {
             return switch (self) {
                 .@"-e" => self,
                 .diagnostic => |v| .{ .diagnostic = try v.clone(alloc) },
-                .arg => |v| .{ .arg = try alloc.dupeZ(u8, v) },
+                .arg => |v| .{ .arg = .{
+                    .value = try alloc.dupeZ(u8, v.value),
+                    .location = try v.location.clone(alloc),
+                } },
                 .expand => |v| .{ .expand = try alloc.dupe(u8, v) },
                 .conditional_arg => |v| conditional: {
                     var conds = try alloc.alloc(Conditional, v.conditions.len);
@@ -5421,6 +5438,7 @@ const Replay = struct {
                     break :conditional .{ .conditional_arg = .{
                         .conditions = conds,
                         .arg = try alloc.dupe(u8, v.arg),
+                        .location = try v.location.clone(alloc),
                     } };
                 },
             };
@@ -5433,6 +5451,8 @@ const Replay = struct {
         config: *Config,
         slice: []const Replay.Step,
         idx: usize = 0,
+        /// Where the argument most recently returned by `next` first came from.
+        origin: cli.Location = .none,
 
         pub fn next(self: *Self) ?[]const u8 {
             while (true) {
@@ -5463,6 +5483,7 @@ const Replay = struct {
                     },
 
                     .conditional_arg => |v| conditional: {
+                        self.origin = v.location;
                         // All conditions must match.
                         for (v.conditions) |cond| {
                             if (!self.config._conditional_state.match(cond)) {
@@ -5473,10 +5494,19 @@ const Replay = struct {
                         return v.arg;
                     },
 
-                    .arg => |arg| return arg,
+                    .arg => |arg| {
+                        self.origin = arg.location;
+                        return arg.value;
+                    },
                     .@"-e" => return "-e",
                 }
             }
+        }
+
+        /// The origin of the last argument, so a diagnostic reproduced by a
+        /// replay keeps the location it was first parsed with.
+        pub fn location(self: *const Self, alloc: Allocator) Allocator.Error!?cli.Location {
+            return try self.origin.clone(alloc);
         }
     };
 
