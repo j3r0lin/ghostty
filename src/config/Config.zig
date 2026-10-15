@@ -3969,6 +3969,11 @@ _load_failed: bool = false,
 /// config, so this has to be repopulated there rather than copied.
 _load_paths: std.ArrayList([:0]const u8) = .empty,
 
+/// Where the theme was configured from. A theme that fails to open is
+/// reported with this origin, so a theme named on the command line is not
+/// mistaken for one the configuration file could fix.
+_theme_location: cli.Location = .none,
+
 /// The conditional truths for the configuration. This is used to
 /// determine if a conditional configuration matches or not.
 _conditional_state: conditional.State = .{},
@@ -4550,6 +4555,14 @@ pub fn changeConditionalState(
     // Replay all of our steps to rebuild the configuration
     var it = Replay.iterator(self._replay_steps.items, &new_config);
     try new_config.loadIter(alloc_gpa, &it);
+
+    // The replay parses steps instead of opening files, so it never
+    // repopulates the paths the load recorded. Carry them over before
+    // finalize, which rebuilds the config again for a theme.
+    new_config._load_failed = self._load_failed;
+    for (self._load_paths.items) |recorded| try new_config.noteLoadPath(recorded);
+    new_config._theme_location = self._theme_location;
+
     try new_config.finalize();
 
     return new_config;
@@ -4627,6 +4640,7 @@ fn loadTheme(self: *Config, theme: Theme) !void {
         self._arena.?.allocator(),
         name,
         &self._diagnostics,
+        self._theme_location,
     )) orelse return;
     const path = themefile.path;
     const file = themefile.file;
@@ -4712,6 +4726,7 @@ fn loadTheme(self: *Config, theme: Theme) !void {
     new_config._load_failed = self._load_failed;
     for (self._load_paths.items) |recorded| try new_config.noteLoadPath(recorded);
     try new_config.noteLoadPath(path);
+    new_config._theme_location = self._theme_location;
 
     // Success, swap our new config in and free the old.
     self.deinit();
@@ -4994,6 +5009,10 @@ pub fn parseManuallyHook(
         return false;
     }
 
+    if (std.mem.startsWith(u8, arg, "--theme=")) {
+        self._theme_location = try cli.Location.fromIter(iter, alloc);
+    }
+
     // Keep track of our input args for replay
     try self._replay_steps.append(
         alloc,
@@ -5215,6 +5234,7 @@ pub fn clone(
     // Copy our diagnostics and whether a load step failed outright.
     result._diagnostics = try self._diagnostics.clone(alloc_arena);
     result._load_failed = self._load_failed;
+    result._theme_location = try self._theme_location.clone(alloc_arena);
     try result._load_paths.ensureTotalCapacity(alloc_arena, self._load_paths.items.len);
     for (self._load_paths.items) |path| {
         result._load_paths.appendAssumeCapacity(try alloc_arena.dupeZ(u8, path));

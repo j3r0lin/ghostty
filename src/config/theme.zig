@@ -115,6 +115,7 @@ pub fn open(
     arena_alloc: Allocator,
     theme: []const u8,
     diags: *cli.DiagnosticList,
+    location: cli.Location,
 ) error{ OutOfMemory, Unexpected }!?struct {
     path: []const u8,
     file: std.Io.File,
@@ -125,9 +126,11 @@ pub fn open(
             arena_alloc,
             theme,
             diags,
+            location,
         ) orelse return null;
         const stat = file.stat(global.io()) catch |err| {
             try diags.append(arena_alloc, .{
+                .location = location,
                 .message = try std.fmt.allocPrintSentinel(
                     arena_alloc,
                     "not reading theme from \"{s}\": {}",
@@ -141,6 +144,7 @@ pub fn open(
             .file => {},
             else => {
                 try diags.append(arena_alloc, .{
+                    .location = location,
                     .message = try std.fmt.allocPrintSentinel(
                         arena_alloc,
                         "not reading theme from \"{s}\": it is a {s}",
@@ -157,6 +161,7 @@ pub fn open(
     const basename = std.fs.path.basename(theme);
     if (!std.mem.eql(u8, theme, basename)) {
         try diags.append(arena_alloc, .{
+            .location = location,
             .message = try std.fmt.allocPrintSentinel(
                 arena_alloc,
                 "theme \"{s}\" cannot include path separators unless it is an absolute path",
@@ -176,6 +181,7 @@ pub fn open(
         if (cwd.openFile(global.io(), path, .{})) |file| {
             const stat = file.stat(global.io()) catch |err| {
                 try diags.append(arena_alloc, .{
+                    .location = location,
                     .message = try std.fmt.allocPrintSentinel(
                         arena_alloc,
                         "not reading theme from \"{s}\": {}",
@@ -189,6 +195,7 @@ pub fn open(
                 .file => {},
                 else => {
                     try diags.append(arena_alloc, .{
+                        .location = location,
                         .message = try std.fmt.allocPrintSentinel(
                             arena_alloc,
                             "not reading theme from \"{s}\": it is a {s}",
@@ -210,6 +217,7 @@ pub fn open(
             // Anything else is an error we log and give up on.
             else => {
                 try diags.append(arena_alloc, .{
+                    .location = location,
                     .message = try std.fmt.allocPrintSentinel(
                         arena_alloc,
                         "failed to load theme \"{s}\" from the file \"{s}\": {}",
@@ -231,6 +239,7 @@ pub fn open(
     while (try it.next()) |loc| {
         const path = try std.fs.path.join(arena_alloc, &.{ loc.dir, theme });
         try diags.append(arena_alloc, .{
+            .location = location,
             .message = try std.fmt.allocPrintSentinel(
                 arena_alloc,
                 "theme \"{s}\" not found, tried path \"{s}\"",
@@ -255,10 +264,12 @@ pub fn openAbsolute(
     arena_alloc: Allocator,
     theme: []const u8,
     diags: *cli.DiagnosticList,
+    location: cli.Location,
 ) error{OutOfMemory}!?std.Io.File {
     return std.Io.Dir.openFileAbsolute(global.io(), theme, .{}) catch |err| {
         switch (err) {
             error.FileNotFound => try diags.append(arena_alloc, .{
+                .location = location,
                 .message = try std.fmt.allocPrintSentinel(
                     arena_alloc,
                     "failed to load theme from the path \"{s}\"",
@@ -267,6 +278,7 @@ pub fn openAbsolute(
                 ),
             }),
             else => try diags.append(arena_alloc, .{
+                .location = location,
                 .message = try std.fmt.allocPrintSentinel(
                     arena_alloc,
                     "failed to load theme from the path \"{s}\": {}",

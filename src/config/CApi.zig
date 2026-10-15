@@ -331,6 +331,63 @@ test "ghostty_config_load: a theme replay still counts a file error" {
     try testing.expect(ghostty_config_reload_diagnostics_count(&cfg) > 0);
 }
 
+test "ghostty_config_load: a conditional state change keeps the load paths" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const extra = try writeConfig(&tmp.dir, "extra", "cursor-style = block\n");
+    defer alloc.free(extra);
+    const light = try writeConfig(&tmp.dir, "light", "background = #ffffff\n");
+    defer alloc.free(light);
+    const dark = try writeConfig(&tmp.dir, "dark", "background = #111111\n");
+    defer alloc.free(dark);
+    const text = try std.fmt.allocPrint(
+        alloc,
+        "config-file = {s}\ntheme = light:{s},dark:{s}\n",
+        .{ extra, light, dark },
+    );
+    defer alloc.free(text);
+    const root = try writeConfig(&tmp.dir, "config", text);
+    defer alloc.free(root);
+
+    var cfg = try Config.default(alloc);
+    defer cfg.deinit();
+    try cfg.loadFile(alloc, root);
+    try cfg.loadRecursiveFiles(alloc);
+    try cfg.finalize();
+
+    // A system appearance change rebuilds the config through this call.
+    var switched = (try cfg.changeConditionalState(.{ .theme = .dark })).?;
+    defer switched.deinit();
+
+    const flat = try listedPaths(&switched);
+    defer alloc.free(flat.ptr[0 .. flat.len + 1]);
+    try testing.expect(std.mem.indexOf(u8, flat, root) != null);
+    try testing.expect(std.mem.indexOf(u8, flat, extra) != null);
+    try testing.expect(std.mem.indexOf(u8, flat, dark) != null);
+}
+
+test "ghostty_config_load: a theme named only on the CLI stays CLI" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const path = try writeConfig(&tmp.dir, "config", "cursor-style = block\n");
+    defer alloc.free(path);
+
+    var cfg = try Config.default(alloc);
+    defer cfg.deinit();
+    ghostty_config_load_file(&cfg, path.ptr);
+    var args: CliArgs = .{ .args = &.{"--theme=ghostty-no-such-theme"} };
+    try cfg.loadIter(alloc, &args);
+    ghostty_config_finalize(&cfg);
+
+    try testing.expect(!ghostty_config_load_failed(&cfg));
+    try testing.expect(ghostty_config_diagnostics_count(&cfg) > 0);
+    try testing.expectEqual(@as(u32, 0), ghostty_config_reload_diagnostics_count(&cfg));
+}
+
 test "ghostty_config_load: a bad CLI argument does not reject the file" {
     const testing = std.testing;
     const alloc = testing.allocator;
