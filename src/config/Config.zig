@@ -4559,9 +4559,10 @@ pub fn changeConditionalState(
     // The replay parses steps instead of opening files, so it never
     // repopulates the paths the load recorded. Carry them over before
     // finalize, which rebuilds the config again for a theme.
+    // _theme_location is not carried over: the replay above sets it again,
+    // cloning the origin into this config's arena.
     new_config._load_failed = self._load_failed;
     for (self._load_paths.items) |recorded| try new_config.noteLoadPath(recorded);
-    new_config._theme_location = self._theme_location;
 
     try new_config.finalize();
 
@@ -4723,10 +4724,11 @@ fn loadTheme(self: *Config, theme: Theme) !void {
     // The replay parses steps instead of opening files, so it never
     // repopulates the paths the load recorded. Carry them over, and add
     // the theme file, before the old config is freed.
+    // _theme_location is not carried over: the replay above sets it again,
+    // cloning the origin into this config's arena.
     new_config._load_failed = self._load_failed;
     for (self._load_paths.items) |recorded| try new_config.noteLoadPath(recorded);
     try new_config.noteLoadPath(path);
-    new_config._theme_location = self._theme_location;
 
     // Success, swap our new config in and free the old.
     self.deinit();

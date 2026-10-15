@@ -388,6 +388,60 @@ test "ghostty_config_load: a theme named only on the CLI stays CLI" {
     try testing.expectEqual(@as(u32, 0), ghostty_config_reload_diagnostics_count(&cfg));
 }
 
+test "ghostty_config_load: a theme named in a file survives a conditional change" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    // Naming the theme in the file makes its origin a .file location, whose
+    // path lives in the config's arena. A shallow copy of it would dangle
+    // once that config is freed.
+    const text = "theme = light:ghostty-no-such-light,dark:ghostty-no-such-dark\n";
+    const root = try writeConfig(&tmp.dir, "config", text);
+    defer alloc.free(root);
+
+    var cfg = try Config.default(alloc);
+    try cfg.loadFile(alloc, root);
+    try cfg.finalize();
+    try testing.expect(cfg._theme_location == .file);
+    const source_path = switch (cfg._theme_location) {
+        .file => |file| file.path,
+        else => return error.TestUnexpectedResult,
+    };
+
+    var switched = (try cfg.changeConditionalState(.{ .theme = .dark })) orelse
+        return error.TestUnexpectedResult;
+    defer switched.deinit();
+
+    // A shallow copy would still point into the freed config's arena, which
+    // is what a later clone or theme diagnostic would read.
+    cfg.deinit();
+    const switched_path = switch (switched._theme_location) {
+        .file => |file| file.path,
+        else => return error.TestUnexpectedResult,
+    };
+    try testing.expect(switched_path.ptr != source_path.ptr);
+    try testing.expectEqualStrings(root, switched_path);
+
+    var cloned = try switched.clone(alloc);
+    defer cloned.deinit();
+    try testing.expect(cloned._theme_location == .file);
+
+    // The theme could not be opened, so there is a diagnostic pointing at
+    // the file that named it.
+    var found = false;
+    for (switched._diagnostics.items()) |diag| {
+        switch (diag.location) {
+            .file => |file| {
+                try testing.expectEqualStrings(root, file.path);
+                found = true;
+            },
+            else => {},
+        }
+    }
+    try testing.expect(found);
+}
+
 test "ghostty_config_load: a bad CLI argument does not reject the file" {
     const testing = std.testing;
     const alloc = testing.allocator;
