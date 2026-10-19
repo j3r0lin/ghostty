@@ -56,6 +56,30 @@ enum CLIAgent: String, CaseIterable, Equatable {
         }
     }
 
+    /// Status prefixes the agent writes in front of its terminal title. These
+    /// were read from the agents themselves (Claude Code 2.1.303, Codex 0.163.0)
+    /// and are not a documented contract, so a new agent version may change them.
+    private var titleStatusPrefixes: (busy: [String], idle: [String]) {
+        switch self {
+        case .claude: (["◐", "◑"], ["✳"])
+        case .codex: (["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"], [])
+        case .gemini: ([], [])
+        }
+    }
+
+    /// Splits the agent's status prefix off a terminal title. The agent keeps
+    /// rewriting this prefix for as long as it works, unlike OSC 9;4, which it
+    /// sends once per turn.
+    func parseTitle(_ title: String) -> (busy: Bool, title: String) {
+        let prefixes = titleStatusPrefixes
+        for (busy, frames) in [(true, prefixes.busy), (false, prefixes.idle)] {
+            for frame in frames where title.hasPrefix(frame + " ") {
+                return (busy, String(title.dropFirst(frame.count + 1)))
+            }
+        }
+        return (false, title)
+    }
+
     /// Returns an icon image to display for this agent in notification toasts.
     /// Priority:
     ///   1. The installed desktop app's icon (so it stays in sync with the user's app).

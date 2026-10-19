@@ -49,4 +49,34 @@ struct CLIAgentDetectorTests {
         defer { p.terminate() }
         #expect(CLIAgentDetector.childPIDs(of: p.processIdentifier).isEmpty)
     }
+
+    @Test func claudeTitleSpinnerMeansBusy() {
+        let parsed = CLIAgent.claude.parseTitle("◑ Fix login bug")
+        #expect(parsed.busy)
+        #expect(parsed.title == "Fix login bug")
+    }
+
+    @Test func claudeIdleMarkerIsStrippedButNotBusy() {
+        let parsed = CLIAgent.claude.parseTitle("✳ Fix login bug")
+        #expect(!parsed.busy)
+        #expect(parsed.title == "Fix login bug")
+    }
+
+    @Test func codexBrailleSpinnerMeansBusy() {
+        let parsed = CLIAgent.codex.parseTitle("⠹ ghostty")
+        #expect(parsed.busy)
+        #expect(parsed.title == "ghostty")
+    }
+
+    @Test func titleWithoutStatusPrefixIsUnchanged() {
+        let parsed = CLIAgent.codex.parseTitle("ghostty")
+        #expect(!parsed.busy)
+        #expect(parsed.title == "ghostty")
+    }
+
+    @Test func anotherAgentsPrefixIsLeftAlone() {
+        let parsed = CLIAgent.codex.parseTitle("◐ Fix login bug")
+        #expect(!parsed.busy)
+        #expect(parsed.title == "◐ Fix login bug")
+    }
 }
