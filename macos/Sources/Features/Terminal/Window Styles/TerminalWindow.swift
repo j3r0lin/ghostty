@@ -92,8 +92,6 @@ class TerminalWindow: NSWindow {
         // Only the glow background is suppressed on the active tab; the spinner
         // is kept so the active tab still shows it's busy.
         progressGlowLayer?.isHidden = isKeyWindow
-        brailleSpinnerHoverView?.isHidden = false
-        brailleSpinnerView?.isHidden = false
     }
 
     func updateTabUnreadVisibility() {
@@ -243,6 +241,12 @@ class TerminalWindow: NSWindow {
     }
 
     private func updateTabAgentIcon() {
+        // The spinner's slot depends on whether there is an icon, so move it to wherever
+        // the rebuilt tab puts it.
+        let wasBusy = brailleSpinnerView != nil
+        removeBrailleSpinner()
+        defer { if wasBusy { attachBrailleSpinner() } }
+
         tabAgentHoverView?.removeFromSuperview()
         tabAgentHoverView = nil
         tabAgentIconView?.removeFromSuperview()
@@ -283,12 +287,6 @@ class TerminalWindow: NSWindow {
 
         tabAgentIconView = iconView
         tabAgentHoverView = hoverView
-
-        // A fresh icon starts visible; re-attach so a running spinner hides it again.
-        if brailleSpinnerView != nil {
-            removeBrailleSpinner()
-            attachBrailleSpinner()
-        }
     }
 
     private func updateTabProgress() {
@@ -350,11 +348,13 @@ class TerminalWindow: NSWindow {
             // overlap the title once the tab is narrow enough to truncate it.
             let spinner = BrailleSpinnerView(fontSize: spinnerSize)
             spinner.translatesAutoresizingMaskIntoConstraints = false
+            spinner.isHidden = hoverView.isHovering
             hoverView.addSubview(spinner)
             NSLayoutConstraint.activate([
                 spinner.centerXAnchor.constraint(equalTo: hoverView.centerXAnchor),
                 spinner.centerYAnchor.constraint(equalTo: hoverView.centerYAnchor),
             ])
+            // alphaValue, not isHidden: the hover view owns isHidden for its close-button swap.
             tabAgentIconView?.alphaValue = 0
             brailleSpinnerView = spinner
         } else {
@@ -1434,6 +1434,7 @@ private class BrailleSpinnerView: NSView {
 private class AgentIconHoverView: NSView {
     private let closeButtonFinder: () -> NSView?
     private var trackingArea: NSTrackingArea?
+    private(set) var isHovering = false
 
     init(closeButtonFinder: @escaping () -> NSView?) {
         self.closeButtonFinder = closeButtonFinder
@@ -1459,12 +1460,13 @@ private class AgentIconHoverView: NSView {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        // Hides the agent icon and a busy spinner sitting in its slot alike.
+        isHovering = true
         subviews.forEach { $0.isHidden = true }
         closeButtonFinder()?.isHidden = false
     }
 
     override func mouseExited(with event: NSEvent) {
+        isHovering = false
         subviews.forEach { $0.isHidden = false }
         closeButtonFinder()?.isHidden = true
     }
