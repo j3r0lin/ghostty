@@ -259,7 +259,6 @@ class TerminalWindow: NSWindow {
         iconView.translatesAutoresizingMaskIntoConstraints = false
 
         let hoverView = AgentIconHoverView(
-            iconView: iconView,
             closeButtonFinder: { [weak tabButton] in
                 tabButton?.firstDescendant(withClassName: "NSRolloverButton")
             }
@@ -284,6 +283,12 @@ class TerminalWindow: NSWindow {
 
         tabAgentIconView = iconView
         tabAgentHoverView = hoverView
+
+        // A fresh icon starts visible; re-attach so a running spinner hides it again.
+        if brailleSpinnerView != nil {
+            removeBrailleSpinner()
+            attachBrailleSpinner()
+        }
     }
 
     private func updateTabProgress() {
@@ -341,13 +346,16 @@ class TerminalWindow: NSWindow {
 
         if tabAgentIconView != nil, let hoverView = tabAgentHoverView {
             guard brailleSpinnerView?.superview == nil else { return }
+            // The spinner takes the icon's slot: outside the 28pt reserved area it would
+            // overlap the title once the tab is narrow enough to truncate it.
             let spinner = BrailleSpinnerView(fontSize: spinnerSize)
             spinner.translatesAutoresizingMaskIntoConstraints = false
-            tabButton.addSubview(spinner)
+            hoverView.addSubview(spinner)
             NSLayoutConstraint.activate([
-                spinner.leadingAnchor.constraint(equalTo: hoverView.trailingAnchor, constant: -4),
-                spinner.centerYAnchor.constraint(equalTo: tabButton.centerYAnchor),
+                spinner.centerXAnchor.constraint(equalTo: hoverView.centerXAnchor),
+                spinner.centerYAnchor.constraint(equalTo: hoverView.centerYAnchor),
             ])
+            tabAgentIconView?.alphaValue = 0
             brailleSpinnerView = spinner
         } else {
             guard brailleSpinnerHoverView == nil else { return }
@@ -355,7 +363,6 @@ class TerminalWindow: NSWindow {
             spinner.translatesAutoresizingMaskIntoConstraints = false
 
             let hoverView = AgentIconHoverView(
-                iconView: spinner,
                 closeButtonFinder: { [weak tabButton] in
                     tabButton?.firstDescendant(withClassName: "NSRolloverButton")
                 }
@@ -382,6 +389,7 @@ class TerminalWindow: NSWindow {
     }
 
     private func removeBrailleSpinner() {
+        tabAgentIconView?.alphaValue = 1
         brailleSpinnerView?.stopAnimating()
         brailleSpinnerView?.removeFromSuperview()
         brailleSpinnerView = nil
@@ -1424,12 +1432,10 @@ private class BrailleSpinnerView: NSView {
 /// Transparent overlay that sits on the close-button area of an NSTabButton.
 /// Shows the agent icon by default; on mouse hover reveals the close button instead.
 private class AgentIconHoverView: NSView {
-    private let iconView: NSView
     private let closeButtonFinder: () -> NSView?
     private var trackingArea: NSTrackingArea?
 
-    init(iconView: NSView, closeButtonFinder: @escaping () -> NSView?) {
-        self.iconView = iconView
+    init(closeButtonFinder: @escaping () -> NSView?) {
         self.closeButtonFinder = closeButtonFinder
         super.init(frame: .zero)
     }
@@ -1453,12 +1459,13 @@ private class AgentIconHoverView: NSView {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        iconView.isHidden = true
+        // Hides the agent icon and a busy spinner sitting in its slot alike.
+        subviews.forEach { $0.isHidden = true }
         closeButtonFinder()?.isHidden = false
     }
 
     override func mouseExited(with event: NSEvent) {
-        iconView.isHidden = false
+        subviews.forEach { $0.isHidden = false }
         closeButtonFinder()?.isHidden = true
     }
 
