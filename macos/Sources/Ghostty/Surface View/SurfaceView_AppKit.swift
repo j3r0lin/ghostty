@@ -685,13 +685,16 @@ extension Ghostty {
                 withTimeInterval: 0.075,
                 repeats: false
             ) { [weak self] _ in
+                guard let self else { return }
                 // Set the title if it wasn't manually set.
-                guard self?.titleFromTerminal == nil else {
-                    self?.titleFromTerminal = title
-                    return
+                if self.titleFromTerminal == nil {
+                    self.title = title
+                } else {
+                    self.titleFromTerminal = title
                 }
-                self?.title = title
-                self?.detectCLIAgent()
+                self.detectCLIAgent()
+                let busy = self.detectedAgent?.parseTitle(title).busy ?? false
+                if busy != self.agentTitleBusy { self.agentTitleBusy = busy }
             }
         }
 

@@ -75,7 +75,8 @@ class TerminalWindow: NSWindow {
         }
     }
 
-    /// Whether the surface is reporting progress.
+    /// Whether the tab shows busy: the agent's title says it is working or the
+    /// surface reports progress.
     var showTabProgress: Bool = false {
         didSet {
             guard showTabProgress != oldValue else { return }

@@ -35,6 +35,10 @@ extension Ghostty {
         // The detected CLI agent (if any) running in this terminal
         @Published var detectedAgent: CLIAgent?
 
+        /// Whether the detected agent's title status says it is working. Read
+        /// from the terminal's title even when the user has renamed the surface.
+        @Published var agentTitleBusy: Bool = false
+
         // The detected CLI agent session info (argv, pid) — set when agent is first detected or PID changes
         @Published var detectedAgentSession: CLIAgentSessionInfo?
 

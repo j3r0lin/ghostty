@@ -893,17 +893,15 @@ class BaseTerminalController: NSWindowController,
         // closed surfaces.
         if let titleSurface = focusedSurface ?? lastFocusedSurface,
            surfaceTree.contains(titleSurface) {
-            // A detected agent's status prefix moves out of the title and into
-            // the tab's busy indicator.
-            let agentTitle = titleSurface.$title
-                .combineLatest(titleSurface.$detectedAgent)
-                .map { title, agent in agent?.parseTitle(title) ?? (busy: false, title: title) }
-
             // If we have a surface, we want to listen for title and pwd changes.
-            agentTitle
+            // A detected agent's status prefix is dropped from the title; the
+            // tab's busy indicator shows it instead.
+            titleSurface.$title
+                .combineLatest(titleSurface.$detectedAgent)
+                .map { title, agent in agent?.parseTitle(title).title ?? title }
                 .combineLatest(titleSurface.$bell, titleSurface.$pwd)
-                .map { [weak self] agentTitle, bell, pwd -> String in
-                    self?.computeTitle(title: agentTitle.title, bell: bell, pwd: pwd) ?? ""
+                .map { [weak self] (title: String, bell: Bool, pwd: String?) -> String in
+                    self?.computeTitle(title: title, bell: bell, pwd: pwd) ?? ""
                 }
                 // Terminal programs re-send the same title constantly. Assigning an
                 // unchanged NSWindow.title still dirties the titlebar and the tab.
@@ -913,12 +911,12 @@ class BaseTerminalController: NSWindowController,
 
             // The tab shows busy while the agent's title says so or a program
             // reports progress.
-            agentTitle
+            titleSurface.$agentTitleBusy
                 .combineLatest(titleSurface.$progressReport)
-                .map { agentTitle, progress in agentTitle.busy || progress != nil }
+                .map { titleBusy, progress in titleBusy || progress != nil }
                 .removeDuplicates()
-                .sink { [weak self] hasProgress in
-                    (self?.window as? TerminalWindow)?.showTabProgress = hasProgress
+                .sink { [weak self] busy in
+                    (self?.window as? TerminalWindow)?.showTabProgress = busy
                 }
                 .store(in: &focusedSurfaceCancellables)
 
