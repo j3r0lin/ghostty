@@ -104,7 +104,6 @@ extension Ghostty {
 
         func setChildExitedMessage(_ message: ChildExitedMessage) {
             self.childExitedMessage = message
-            self.progressReport = nil
         }
 
         @MainActor

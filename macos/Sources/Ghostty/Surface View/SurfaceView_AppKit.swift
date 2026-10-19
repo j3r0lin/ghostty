@@ -19,17 +19,25 @@ extension Ghostty {
             }
         }
 
-        // The progress report (if any). Cleared by an explicit OSC 9;4;0
-        // (remove), when the child process exits, or once the foreground
-        // process group that reported it is gone: programs that exit without
-        // sending remove would otherwise leave it up until the shell exits.
+        // The progress report (if any)
         override var progressReport: Action.ProgressReport? {
             didSet {
-                progressOwner.record(reporting: progressReport != nil, foreground: surfaceModel?.foregroundPID)
+                // Cancel any existing timer
+                progressReportTimer?.invalidate()
+                progressReportTimer = nil
+
+                // If we have a new progress report, start a timer to remove it after 15 seconds
+                if progressReport != nil {
+                    progressReportTimer = Timer.scheduledTimer(withTimeInterval: 15.0, repeats: false) { [weak self] _ in
+                        self?.progressReport = nil
+                        self?.progressReportTimer = nil
+                    }
+                }
             }
         }
 
-        private var progressOwner = ProgressOwner()
+        // Timer to remove progress report after 15 seconds
+        private var progressReportTimer: Timer?
 
         // The currently active key sequence. The sequence is not active if this is empty.
         @Published var keySequence: [KeyboardShortcut] = []
@@ -446,6 +454,8 @@ extension Ghostty {
                 appDelegate.ghostty.removeUnreadNotification(surfaceID: self.id)
             }
 
+            // Cancel progress report timer
+            progressReportTimer?.invalidate()
         }
 
         private func detectCLIAgent() {
@@ -453,19 +463,12 @@ extension Ghostty {
                 if detectedAgent != nil {
                     detectedAgent = nil
                     detectedAgentSession = nil
-                    progressReport = nil
                 }
                 return
-            }
-            if progressOwner.isStale(foreground: pid) {
-                progressReport = nil
             }
             let result = CLIAgentDetector.detectWithPID(fromPID: pid)
             let agent = result?.agent
             if agent != detectedAgent {
-                if detectedAgent != nil && agent == nil {
-                    progressReport = nil
-                }
                 detectedAgent = agent
 
                 if let result = result,
@@ -480,20 +483,6 @@ extension Ghostty {
                     detectedAgentSession = CLIAgentSessionInfo(
                         agent: result.agent, argv: argv, execPath: execPath, pid: result.matchedPID)
                 }
-            }
-        }
-
-        /// The foreground process group that last reported progress.
-        struct ProgressOwner {
-            private var pgid: Int?
-
-            mutating func record(reporting: Bool, foreground: Int?) {
-                pgid = reporting ? foreground : nil
-            }
-
-            func isStale(foreground: Int) -> Bool {
-                guard let pgid else { return false }
-                return pgid != foreground
             }
         }
 
