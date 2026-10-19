@@ -1459,6 +1459,10 @@ private class AgentIconHoverView: NSView {
         trackingArea = area
     }
 
+    // Sits above the tab's close button; letting clicks fall through is what makes the
+    // revealed close button clickable. Hover tracking doesn't depend on hit testing.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
     override func mouseEntered(with event: NSEvent) {
         isHovering = true
         subviews.forEach { $0.isHidden = true }
