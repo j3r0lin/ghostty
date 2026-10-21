@@ -1084,15 +1084,29 @@ pub fn handleMessage(self: *Surface, msg: Message) !void {
         .child_exited => |v| self.childExited(v),
 
         .desktop_notification => |notification| {
+            const title = std.mem.sliceTo(&notification.title, 0);
+            const body = std.mem.sliceTo(&notification.body, 0);
+            const agent = std.mem.sliceTo(&notification.agent, 0);
+            const state = std.mem.sliceTo(&notification.state, 0);
+
+            // `state=read` marks the surface's notifications as seen instead
+            // of showing one. It must pass even with notifications disabled,
+            // and must not take the rate limit slot of a real notification
+            // that follows within a second.
+            if (std.mem.eql(u8, state, "read")) {
+                _ = try self.rt_app.performAction(
+                    .{ .surface = self },
+                    .desktop_notification,
+                    .{ .title = title, .body = body, .agent = agent, .state = state },
+                );
+                return;
+            }
+
             if (!self.config.desktop_notifications) {
                 log.info("application attempted to display a desktop notification, but 'desktop-notifications' is disabled", .{});
                 return;
             }
 
-            const title = std.mem.sliceTo(&notification.title, 0);
-            const body = std.mem.sliceTo(&notification.body, 0);
-            const agent = std.mem.sliceTo(&notification.agent, 0);
-            const state = std.mem.sliceTo(&notification.state, 0);
             try self.showDesktopNotification(title, body, agent, state);
         },
 

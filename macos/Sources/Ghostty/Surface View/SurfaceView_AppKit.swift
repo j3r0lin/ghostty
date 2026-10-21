@@ -518,18 +518,7 @@ extension Ghostty {
                 // We unset our bell state if we gained focus
                 bell = false
 
-                // Remove any notifications for this surface once we gain focus.
-                if !notificationIdentifiers.isEmpty {
-                    UNUserNotificationCenter.current()
-                        .removeDeliveredNotifications(
-                            withIdentifiers: Array(notificationIdentifiers))
-                    self.notificationIdentifiers = []
-                }
-
-                // Clear unread notification ring for this surface.
-                if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
-                    appDelegate.ghostty.removeUnreadNotification(surfaceID: self.id)
-                }
+                markNotificationsRead()
             }
         }
 
@@ -1919,6 +1908,21 @@ extension Ghostty {
             self.notificationIdentifiers.remove(id)
             if focus {
                 focusFromNotification()
+            }
+        }
+
+        /// Clears everything still telling the user this surface has news: the
+        /// tab's unread mark, its toasts, and its delivered system notifications.
+        func markNotificationsRead() {
+            if !notificationIdentifiers.isEmpty {
+                UNUserNotificationCenter.current()
+                    .removeDeliveredNotifications(
+                        withIdentifiers: Array(notificationIdentifiers))
+                notificationIdentifiers = []
+            }
+            NotificationToastManager.shared.dismiss(surfaceID: id)
+            if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
+                appDelegate.ghostty.removeUnreadNotification(surfaceID: id)
             }
         }
 

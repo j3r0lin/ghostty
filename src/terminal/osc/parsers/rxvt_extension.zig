@@ -162,3 +162,19 @@ test "OSC: OSC 777 show desktop notification unknown trailing key stays in body"
     try testing.expectEqualStrings(cmd.show_desktop_notification.body, "Body;url=https://x?a=b");
     try testing.expect(cmd.show_desktop_notification.agent == null);
 }
+
+test "OSC: OSC 777 read mark with empty title and body" {
+    const testing = std.testing;
+
+    var p: Parser = .init(null);
+
+    const input = "777;notify;;;state=read";
+    for (input) |ch| p.next(ch);
+
+    const cmd = p.end('\x1b').?.*;
+    try testing.expect(cmd == .show_desktop_notification);
+    try testing.expectEqualStrings(cmd.show_desktop_notification.title, "");
+    try testing.expectEqualStrings(cmd.show_desktop_notification.body, "");
+    try testing.expect(cmd.show_desktop_notification.agent == null);
+    try testing.expectEqualStrings(cmd.show_desktop_notification.state.?, "read");
+}

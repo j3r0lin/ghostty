@@ -79,6 +79,13 @@ final class NotificationToastManager {
         removeEntry(at: idx, animated: true)
     }
 
+    /// Dismiss every toast from the given surface.
+    func dismiss(surfaceID: UUID) {
+        while let idx = entries.firstIndex(where: { $0.toast.surfaceID == surfaceID }) {
+            removeEntry(at: idx, animated: true)
+        }
+    }
+
     /// Pause auto-dismissal while the cursor is over the toast and restart it
     /// when the cursor leaves.
     func hoverChanged(id: UUID, hovering: Bool) {

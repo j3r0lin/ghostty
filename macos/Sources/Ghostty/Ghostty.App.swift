@@ -1665,6 +1665,10 @@ extension Ghostty {
             case GHOSTTY_TARGET_SURFACE:
                 guard let surface = target.target.surface else { return }
                 guard let surfaceView = self.surfaceView(from: surface) else { return }
+                if String(cString: n.state!, encoding: .utf8) == "read" {
+                    DispatchQueue.main.async { surfaceView.markNotificationsRead() }
+                    return
+                }
                 guard let title = String(cString: n.title!, encoding: .utf8) else { return }
                 guard let body = String(cString: n.body!, encoding: .utf8) else { return }
                 let resolvedTitle = title == ClaudeCodeSession.defaultTitle
