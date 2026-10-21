@@ -2268,6 +2268,9 @@ const Action = struct {
         target: apprt.Target,
         n: apprt.action.DesktopNotification,
     ) void {
+        // A read mark carries no notification; GTK has no unread state to clear.
+        if (std.mem.eql(u8, n.state, "read")) return;
+
         switch (target) {
             .app => {},
             .surface => |v| {
