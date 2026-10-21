@@ -171,8 +171,8 @@ class TerminalWindow: NSWindow {
     }
 
     func reattachTabUnreadTintIfNeeded() {
-        guard tabHasUnread else { return }
-        if unreadBarLayer?.superlayer == nil {
+        guard tabHasUnread, findOwnTabButton() != nil else { return }
+        if !isAttachedToOwnTab(unreadBarLayer) {
             removeUnreadBar()
             attachUnreadBar(animated: true)
         }
@@ -181,7 +181,7 @@ class TerminalWindow: NSWindow {
     private var tabActiveIndicatorLayer: CALayer?
 
     func attachTabActiveIndicator() {
-        if tabActiveIndicatorLayer?.superlayer != nil { return }
+        guard !isAttachedToOwnTab(tabActiveIndicatorLayer) else { return }
         removeTabActiveIndicator()
         guard let tabButton = findOwnTabButton() else { return }
         let layer = CALayer()
@@ -201,7 +201,8 @@ class TerminalWindow: NSWindow {
     private var tabSeparatorLayer: CALayer?
 
     func attachTabSeparator() {
-        guard tabSeparatorLayer == nil, let tabButton = findOwnTabButton() else { return }
+        guard !isAttachedToOwnTab(tabSeparatorLayer), let tabButton = findOwnTabButton() else { return }
+        removeTabSeparator()
         let layer = CALayer()
         layer.backgroundColor = NSColor.white.withAlphaComponent(0.13).cgColor
         let width: CGFloat = 1
@@ -220,7 +221,8 @@ class TerminalWindow: NSWindow {
     }
 
     func reattachTabSeparatorIfNeeded() {
-        if tabSeparatorLayer?.superlayer == nil {
+        guard findOwnTabButton() != nil else { return }
+        if !isAttachedToOwnTab(tabSeparatorLayer) {
             removeTabSeparator()
             attachTabSeparator()
         }
@@ -230,12 +232,56 @@ class TerminalWindow: NSWindow {
         tab.accessoryView?.firstSuperview(withClassName: "NSTabButton")
     }
 
+    /// True when the layer still hangs off the tab button AppKit currently uses for
+    /// this window. AppKit rebuilds that button on some tab bar changes (reordering a
+    /// tab, for one), and a nil superlayer check misses every layer that survived on
+    /// the discarded button.
+    private func isAttachedToOwnTab(_ layer: CALayer?) -> Bool {
+        guard let layer, let tabButton = findOwnTabButton() else { return false }
+        return layer.superlayer === tabButton.layer
+    }
+
+    /// True when the view still lives under the tab button AppKit currently uses for
+    /// this window. See isAttachedToOwnTab.
+    private func isAttachedToOwnTab(_ view: NSView?) -> Bool {
+        guard let view, let tabButton = findOwnTabButton() else { return false }
+        return view.isDescendant(of: tabButton)
+    }
+
     private var tabAgentIconView: NSImageView?
     private var tabAgentHoverView: AgentIconHoverView?
 
+    /// Put every decoration back onto the tab button AppKit currently uses. Called
+    /// after it moves our accessory view into a rebuilt or brand-new tab button.
+    func reattachTabDecorationsIfNeeded() {
+        guard findOwnTabButton() != nil else { return }
+        // The active indicator belongs to the key window only; see becomeKey.
+        if isKeyWindow {
+            attachTabActiveIndicator()
+        } else {
+            removeTabActiveIndicator()
+        }
+        reattachTabSeparatorIfNeeded()
+        reattachTabUnreadTintIfNeeded()
+        reattachTabAgentIconIfNeeded()
+        reattachTabProgressIfNeeded()
+        updateTabProgressVisibility()
+    }
+
+    /// Our accessory view is the only thing we control that AppKit moves into whatever
+    /// tab button it builds for this window, so it is where a rebuild first shows up.
+    fileprivate func tabAccessoryDidMove() {
+        // The button is still being assembled when the view moves; look at it once
+        // the current pass is over.
+        DispatchQueue.main.async { [weak self] in
+            self?.reattachTabDecorationsIfNeeded()
+        }
+    }
+
     func reattachTabAgentIconIfNeeded() {
         guard tabAgent != nil else { return }
-        if tabAgentIconView?.superview == nil {
+        // The icon is a subview of the hover view, so the hover view decides both.
+        if !isAttachedToOwnTab(tabAgentHoverView) {
             updateTabAgentIcon()
         }
     }
@@ -301,14 +347,18 @@ class TerminalWindow: NSWindow {
     }
 
     func reattachTabProgressIfNeeded() {
-        guard showTabProgress else { return }
+        guard showTabProgress, findOwnTabButton() != nil else { return }
         var needsReattach = false
-        if progressGlowLayer?.superlayer == nil {
+        if !isAttachedToOwnTab(progressGlowLayer) {
             removeProgressGlow()
             attachProgressGlow()
             needsReattach = true
         }
-        if brailleSpinnerHoverView?.superview == nil || brailleSpinnerView?.superview == nil {
+
+        // The spinner goes into whichever hover view is in use: the icon's when
+        // there is an agent, its own otherwise.
+        let spinnerHost: NSView? = tabAgentIconView != nil ? tabAgentHoverView : brailleSpinnerHoverView
+        if !isAttachedToOwnTab(spinnerHost) || !isAttachedToOwnTab(brailleSpinnerView) {
             removeBrailleSpinner()
             attachBrailleSpinner()
             needsReattach = true
@@ -517,7 +567,8 @@ class TerminalWindow: NSWindow {
         // where buttons were not clickable on macOS 15.
         tabColorIndicator.rootView = TabColorIndicatorView(tabColor: tabColor)
 
-        let stackView = NSStackView()
+        let stackView = TabAccessoryView()
+        stackView.onMove = { [weak self] in self?.tabAccessoryDidMove() }
         stackView.orientation = .horizontal
         stackView.setHuggingPriority(.defaultHigh, for: .horizontal)
         stackView.spacing = 4
@@ -667,6 +718,10 @@ class TerminalWindow: NSWindow {
     }
 
     private func tabBarDidAppear() {
+        // The first tab bar gives our decorations their first tab button, so anything
+        // attached while the window was alone needs to be placed now.
+        reattachTabDecorationsIfNeeded()
+
         // Remove our reset zoom accessory. For some reason having a SwiftUI
         // titlebar accessory causes our content view scaling to be wrong.
         // Removing it fixes it, we just need to remember to add it again later.
@@ -1426,6 +1481,23 @@ private class BrailleSpinnerView: NSView {
         f.getRed(&fr, green: &fg, blue: &fb, alpha: &fa)
         e.getRed(&tr, green: &tg, blue: &tb, alpha: &ta)
         return NSColor(red: fr + (tr - fr) * t, green: fg + (tg - fg) * t, blue: fb + (tb - fb) * t, alpha: 1)
+    }
+}
+
+/// The stack view behind `tab.accessoryView`. AppKit puts it into whichever NSTabButton
+/// it builds for our tab, and moving it is how a rebuild shows up before our layers and
+/// subviews are stranded on the old button.
+private class TabAccessoryView: NSStackView {
+    var onMove: (() -> Void)?
+
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        onMove?()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        onMove?()
     }
 }
 
