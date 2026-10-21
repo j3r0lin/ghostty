@@ -139,18 +139,11 @@ class TerminalWindow: NSWindow {
         let bar = CALayer()
         bar.backgroundColor = unreadAccentColor.cgColor
 
-        // The bar sits along the top edge. Which y that is depends on the tab
-        // button's geometry, and the resize mask has to pin the same edge.
-        let height = Self.unreadBarHeight
-        if tabButton.isFlipped {
-            bar.frame = CGRect(x: 0, y: 0, width: tabButton.bounds.width, height: height)
-            bar.autoresizingMask = [.layerWidthSizable, .layerMaxYMargin]
-        } else {
-            bar.frame = CGRect(
-                x: 0, y: tabButton.bounds.height - height,
-                width: tabButton.bounds.width, height: height)
-            bar.autoresizingMask = [.layerWidthSizable, .layerMinYMargin]
-        }
+        // The resize mask has to pin the same edge the bar sits along.
+        bar.frame = unreadBarFrame(in: tabButton)
+        bar.autoresizingMask = tabButton.isFlipped
+            ? [.layerWidthSizable, .layerMaxYMargin]
+            : [.layerWidthSizable, .layerMinYMargin]
         parent.addSublayer(bar)
 
         if animated {
@@ -165,6 +158,17 @@ class TerminalWindow: NSWindow {
         unreadBarLayer = bar
     }
 
+    /// The bar sits along the top edge of the tab button. In fullscreen AppKit moves
+    /// the tab bar into its own window flush with the top of the screen, and there the
+    /// topmost point of the button does not show (seen on macOS 14), so the bar starts
+    /// one point lower.
+    private func unreadBarFrame(in tabButton: NSView) -> CGRect {
+        let height = Self.unreadBarHeight
+        let inset: CGFloat = tabButton.window is TerminalWindow ? 0 : 1
+        let y = tabButton.isFlipped ? inset : tabButton.bounds.height - height - inset
+        return CGRect(x: 0, y: y, width: tabButton.bounds.width, height: height)
+    }
+
     private func removeUnreadBar() {
         unreadBarLayer?.removeFromSuperlayer()
         unreadBarLayer = nil
@@ -175,6 +179,12 @@ class TerminalWindow: NSWindow {
         if !isAttachedToOwnTab(unreadBarLayer) {
             removeUnreadBar()
             attachUnreadBar(animated: true)
+        } else if let bar = unreadBarLayer, let tabButton = findOwnTabButton() {
+            // Entering or leaving fullscreen moves the same button to another window.
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            bar.frame = unreadBarFrame(in: tabButton)
+            CATransaction.commit()
         }
     }
 
