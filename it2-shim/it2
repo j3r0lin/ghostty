@@ -35,11 +35,10 @@ def _trace(msg):
         pass
 
 
-def run_applescript(script):
-    return subprocess.run(
-        ["osascript", "-e", script],
-        capture_output=True, text=True,
-    )
+_GHOSTTY_COMM = "/Ghostty.app/Contents/MacOS/ghostty"
+
+# Resolved once per invocation. None means "not yet"; an int is the chosen pid.
+_instance_pid = None
 
 
 def _self_session_id():
@@ -48,36 +47,177 @@ def _self_session_id():
     return raw.split(":", 1)[1] if ":" in raw else ""
 
 
-def _escape_applescript(text):
-    """Escape a string for use inside an AppleScript double-quoted literal."""
-    return text.replace("\\", "\\\\").replace('"', '\\"')
+def _escape_js(text):
+    """Escape a string for embedding in a JavaScript double-quoted literal."""
+    return text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\r", "\\r")
 
 
-def _applescript_target(session_id):
-    """Return an AppleScript expression for the target terminal."""
-    sid = session_id or _self_session_id()
-    if sid:
-        return f'first terminal whose id is "{_escape_applescript(sid)}"'
-    return 'focused terminal of selected tab of front window'
+def _ghostty_pids():
+    """Return the pids of running Ghostty instances, oldest first."""
+    r = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True, text=True)
+    pids = []
+    for line in r.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        pid_str, _, command = line.partition(" ")
+        if _GHOSTTY_COMM in command:
+            try:
+                pids.append(int(pid_str))
+            except ValueError:
+                pass
+    return pids
 
 
-def _friendly_error(stderr):
-    """Return a user-friendly error message from AppleScript stderr, or None."""
+def _ancestor_ghostty_pid():
+    """Pid of the Ghostty instance this process descends from, or None."""
+    pid = os.getppid()
+    seen = set()
+    while pid > 1 and pid not in seen:
+        seen.add(pid)
+        r = subprocess.run(["ps", "-o", "ppid=,command=", "-p", str(pid)],
+                           capture_output=True, text=True)
+        lines = [l for l in r.stdout.splitlines() if l.strip()]
+        if not lines:
+            return None
+        ppid_str, _, command = lines[-1].strip().partition(" ")
+        if _GHOSTTY_COMM in command:
+            return pid
+        try:
+            pid = int(ppid_str)
+        except ValueError:
+            return None
+    return None
+
+
+def _instance_owning(session_id, pids):
+    """Pid of the instance that has a terminal with this id, or None."""
+    if not session_id:
+        return None
+    for pid in pids:
+        probe = (
+            'ObjC.import("ScriptingBridge");'
+            f'var a=$.SBApplication.applicationWithProcessIdentifier({pid});'
+            f'var t=a.elementArrayWithCode(0x4774726d).objectWithID("{_escape_js(session_id)}");'
+            'var id=t.propertyWithCode(0x49442020).get;'
+            'id && id.js === "' + _escape_js(session_id) + '" ? "yes" : "no"'
+        )
+        r = subprocess.run(["osascript", "-l", "JavaScript", "-e", probe],
+                           capture_output=True, text=True)
+        if r.returncode == 0 and r.stdout.strip() == "yes":
+            return pid
+    return None
+
+
+def _select_instance(session_id):
+    """Choose the Ghostty pid this invocation talks to. Resolved once."""
+    global _instance_pid
+    if _instance_pid is not None:
+        return _instance_pid
+
+    pid = _ancestor_ghostty_pid()
+    # A session id names a terminal. The ancestor instance only wins when it
+    # actually owns that terminal; otherwise follow the id to its instance.
+    if session_id and (pid is None or _instance_owning(session_id, [pid]) is None):
+        pid = _instance_owning(session_id, _ghostty_pids())
+    if pid is None:
+        pids = _ghostty_pids()
+        if len(pids) == 1:
+            pid = pids[0]
+        elif not pids:
+            print("no Ghostty instance running", file=sys.stderr)
+            sys.exit(1)
+        else:
+            print("multiple Ghostty instances running; pass -s or set "
+                  "ITERM_SESSION_ID to choose one: " +
+                  ", ".join(str(p) for p in pids), file=sys.stderr)
+            sys.exit(1)
+
+    _instance_pid = pid
+    _trace(f"    instance: pid {pid}")
+    return pid
+
+
+def run_jxa(body, session_id=None):
+    """Run a JavaScript snippet against the selected Ghostty instance.
+
+    `body` is JavaScript source. It runs with `app` bound to the
+    ScriptingBridge application for the chosen pid, and may `return` a
+    string. The snippet is wrapped so it returns that string on stdout.
+    """
+    pid = _select_instance(session_id)
+    script = (
+        'ObjC.import("Foundation");\n'
+        'ObjC.import("ScriptingBridge");\n'
+        f'var PID = {pid};\n'
+        'var app = $.SBApplication.applicationWithProcessIdentifier(PID);\n'
+        'function targetFor(pid) {\n'
+        '  return $.NSAppleEventDescriptor.descriptorWithProcessIdentifier(pid);\n'
+        '}\n'
+        'function sendEvent(cls, evid, params) {\n'
+        '  var ev = $.NSAppleEventDescriptor.appleEventWithEventClassEventIDTargetDescriptorReturnIDTransactionID(\n'
+        '    cls, evid, targetFor(PID), 0x6e6f7265, 0);\n'
+        '  for (var i = 0; i < params.length; i++) {\n'
+        '    ev.setDescriptorForKeyword(params[i][1], params[i][0]);\n'
+        '  }\n'
+        '  return ev.sendEventWithOptionsTimeoutError(3, 60000, null);\n'
+        '}\n'
+        'function replyValue(reply) {\n'
+        '  if (!reply) return "";\n'
+        '  var d = reply.descriptorForKeyword(0x2d2d2d2d);\n'
+        '  if (!d) return "";\n'
+        '  var s = d.stringValue;\n'
+        '  return s ? s.js : "";\n'
+        '}\n'
+        'function termById(id) {\n'
+        '  return app.elementArrayWithCode(0x4774726d).objectWithID(id);\n'
+        '}\n'
+        'function termExists(id) {\n'
+        '  var got = termById(id).propertyWithCode(0x49442020).get;\n'
+        '  return !!(got && got.js === id);\n'
+        '}\n'
+        'function specifier(obj) {\n'
+        '  var spec = obj.qualifiedSpecifier;\n'
+        '  nullifyFrom(spec);\n'
+        '  return spec;\n'
+        '}\n'
+        'function nullifyFrom(spec) {\n'
+        '  var from = spec.descriptorForKeyword(0x66726f6d);\n'
+        '  if (!from) { spec.setDescriptorForKeyword($.NSAppleEventDescriptor.nullDescriptor, 0x66726f6d); return; }\n'
+        '  if (from.descriptorType === 0x6f626a20) { nullifyFrom(from); return; }\n'
+        '  spec.setDescriptorForKeyword($.NSAppleEventDescriptor.nullDescriptor, 0x66726f6d);\n'
+        '}\n'
+        'function resolve(sessionId) {\n'
+        '  if (sessionId) {\n'
+        '    if (!termExists(sessionId)) return null;\n'
+        '    return termById(sessionId);\n'
+        '  }\n'
+        '  var win = app.propertyWithCode(0x4746576e).get;\n'
+        '  if (!win) return null;\n'
+        '  var tab = win.propertyWithCode(0x47577354).get;\n'
+        '  if (!tab) return null;\n'
+        '  return tab.propertyWithCode(0x47546654).get;\n'
+        '}\n'
+        '(function(){\n' + body + '\n})()\n'
+    )
+    return subprocess.run(["osascript", "-l", "JavaScript", "-e", script],
+                          capture_output=True, text=True)
+
+
+def _friendly_error(stderr, session_id):
+    """Return a user-friendly error message, or None."""
     err = stderr.strip()
+    if "session not found" in err:
+        return f"session not found: {session_id}\nUse 'it2 session list' to see available sessions."
     if "(-1719)" in err or "(-1728)" in err:
-        marker = 'whose id = "'
-        if marker in err:
-            start = err.index(marker) + len(marker)
-            end = err.index('"', start)
-            return f"session not found: {err[start:end]}\nUse 'it2 session list' to see available sessions."
         return "target terminal not found"
     return None
 
 
-def _run_and_check(script):
-    r = run_applescript(script)
+def _run_and_check(body, session_id=None):
+    r = run_jxa(body, session_id)
     if r.returncode != 0:
-        msg = _friendly_error(r.stderr) or f"applescript error: {r.stderr.strip()}"
+        msg = _friendly_error(r.stderr, session_id) or f"applescript error: {r.stderr.strip()}"
         print(msg, file=sys.stderr)
         sys.exit(1)
     return r
@@ -85,23 +225,32 @@ def _run_and_check(script):
 
 # ── subcommand handlers ─────────────────────────────────────────────
 
+def _list_terminals_body():
+    return '''
+var lines = [];
+var wins = app.elementArrayWithCode(0x47776e64);
+for (var i = 0; i < wins.count; i++) {
+  var tabs = wins.objectAtIndex(i).elementArrayWithCode(0x47746162);
+  for (var j = 0; j < tabs.count; j++) {
+    var terms = tabs.objectAtIndex(j).elementArrayWithCode(0x4774726d);
+    for (var k = 0; k < terms.count; k++) {
+      var t = terms.objectAtIndex(k);
+      lines.push([
+        t.propertyWithCode(0x49442020).get.js,
+        t.propertyWithCode(0x706e616d).get.js,
+        t.propertyWithCode(0x47776472).get.js
+      ].join("\\t"));
+    }
+  }
+}
+return lines.join("\\n");'''
+
+
 def cmd_session_list(args):
+    r = run_jxa(_list_terminals_body())
+    if r.returncode != 0:
+        sys.exit(1)
     if getattr(args, "json", False):
-        r = run_applescript('''
-set out to ""
-tell application "Ghostty"
-  repeat with w in (every window)
-    repeat with t in (every tab of w)
-      repeat with trm in (every terminal of t)
-        if out is not "" then set out to out & linefeed
-        set out to out & (id of trm) & "\t" & (name of trm) & "\t" & (working directory of trm)
-      end repeat
-    end repeat
-  end repeat
-end tell
-return out''')
-        if r.returncode != 0:
-            sys.exit(1)
         sessions = []
         for line in r.stdout.strip().splitlines():
             if not line:
@@ -114,57 +263,51 @@ return out''')
             })
         print(json.dumps(sessions, indent=2))
     else:
-        r = run_applescript('''
-set allIds to {}
-tell application "Ghostty"
-  repeat with w in (every window)
-    repeat with t in (every tab of w)
-      repeat with trm in (every terminal of t)
-        set end of allIds to id of trm
-      end repeat
-    end repeat
-  end repeat
-end tell
-set AppleScript's text item delimiters to linefeed
-set output to allIds as text
-set AppleScript's text item delimiters to ""
-return output''')
-        if r.returncode != 0:
-            sys.exit(1)
         print("Session ID")
         output = r.stdout.strip()
         if output:
-            print(output)
+            print("\n".join(line.split("\t", 1)[0] for line in output.splitlines()))
 
 
 def cmd_session_split(args):
     direction = "right" if args.vertical else "down"
-    target = _applescript_target(args.session)
-
+    sid = args.session or _self_session_id()
+    dir_code = {"right": "0x47537274", "left": "0x47536c66",
+                "down": "0x4753646e", "up": "0x47537570"}[direction]
     profile = getattr(args, "profile", None)
-    if profile:
-        profile_escaped = _escape_applescript(profile)
-        script = f'''
-tell application "Ghostty"
-  set sourceT to {target}
-  set cfg to new surface configuration
-  set command of cfg to "{profile_escaped}"
-  set newT to split sourceT direction {direction} with configuration cfg
-  perform action "equalize_splits" on newT
-  {'focus newT' if args.focus else 'focus sourceT'}
-  return id of newT
-end tell'''
-    else:
-        script = f'''
-tell application "Ghostty"
-  set sourceT to {target}
-  set newT to split sourceT direction {direction}
-  perform action "equalize_splits" on newT
-  {'focus newT' if args.focus else 'focus sourceT'}
-  return id of newT
-end tell'''
+    focus_new = "true" if args.focus else "false"
 
-    r = _run_and_check(script)
+    body = f'''
+var t = {_target_expr(sid)};
+if (!t) return "NOTFOUND";
+var params = [[0x2d2d2d2d, specifier(t)], [0x47537064, $.NSAppleEventDescriptor.descriptorWithEnumCode({dir_code})]];
+{"" if not profile else f'var cfgEv = sendEvent(0x47687374, 0x4e534366, []); var cfg = cfgEv.descriptorForKeyword(0x2d2d2d2d); if (cfg) {{ cfg.setDescriptorForKeyword($.NSAppleEventDescriptor.descriptorWithString("{_escape_js(profile)}"), 0x47536343); params.push([0x47537053, cfg]); }}'}
+var reply = sendEvent(0x47687374, 0x53706c74, params);
+var newId = "";
+if (reply) {{
+  for (var di = 1; di <= reply.numberOfItems; di++) {{
+    if (reply.keywordForDescriptorAtIndex(di) !== 0x2d2d2d2d) continue;
+    var newSpec = reply.descriptorAtIndex(di);
+    for (var i = 1; i <= newSpec.numberOfItems; i++) {{
+      if (newSpec.keywordForDescriptorAtIndex(i) === 0x73656c64) {{
+        var seld = newSpec.descriptorAtIndex(i);
+        newId = seld.stringValue ? seld.stringValue.js : "";
+      }}
+    }}
+  }}
+}}
+if (newId) {{
+  var newT = termById(newId);
+  sendEvent(0x47687374, 0x50664163, [[0x2d2d2d2d, $.NSAppleEventDescriptor.descriptorWithString("equalize_splits")], [0x476f6e54, specifier(newT)]]);
+  var focusTarget = {focus_new} ? newT : t;
+  sendEvent(0x47687374, 0x46637573, [[0x2d2d2d2d, specifier(focusTarget)]]);
+}}
+return newId;'''
+    r = _run_and_check(body, sid)
+    if r.stdout.strip() == "NOTFOUND":
+        print(f"session not found: {sid}\nUse 'it2 session list' to see available sessions.",
+              file=sys.stderr)
+        sys.exit(1)
     terminal_id = r.stdout.strip()
     if not terminal_id:
         print("unexpected empty terminal id", file=sys.stderr)
@@ -174,49 +317,66 @@ end tell'''
 
 def cmd_session_run(args):
     cmd = " ".join(args.command)
-    cmd_escaped = _escape_applescript(cmd)
-    target = _applescript_target(args.session)
-
-    script = f'''
-tell application "Ghostty"
-  set t to {target}
-  input text "{cmd_escaped}" to t
-  delay 0.5
-  send key "enter" to t
-end tell'''
-    _run_and_check(script)
+    sid = args.session or _self_session_id()
+    body = f'''
+var t = {_target_expr(sid)};
+if (!t) return "NOTFOUND";
+var spec = specifier(t);
+sendEvent(0x47687374, 0x496e5478, [[0x2d2d2d2d, $.NSAppleEventDescriptor.descriptorWithString("{_escape_js(cmd)}")], [0x47497454, spec]]);
+delay(0.5);
+sendEvent(0x47687374, 0x534b6579, [[0x2d2d2d2d, $.NSAppleEventDescriptor.descriptorWithString("enter")], [0x474b6554, specifier(t)]]);
+return "ok";'''
+    r = _run_and_check(body, sid)
+    if r.stdout.strip() == "NOTFOUND":
+        print(f"session not found: {sid}\nUse 'it2 session list' to see available sessions.",
+              file=sys.stderr)
+        sys.exit(1)
 
 
 def cmd_session_send(args):
     text = " ".join(args.text)
-    text_escaped = _escape_applescript(text)
+    sid = args.session or _self_session_id()
+    escaped = _escape_js(text)
 
     if args.all:
-        script = f'''
-tell application "Ghostty"
-  repeat with t in terminals
-    input text "{text_escaped}" to t
-  end repeat
-end tell'''
-    else:
-        target = _applescript_target(args.session)
-        script = f'''
-tell application "Ghostty"
-  input text "{text_escaped}" to ({target})
-end tell'''
-    _run_and_check(script)
+        body = f'''
+var terms = app.elementArrayWithCode(0x4774726d);
+for (var i = 0; i < terms.count; i++) {{
+  sendEvent(0x47687374, 0x496e5478, [[0x2d2d2d2d, $.NSAppleEventDescriptor.descriptorWithString("{escaped}")], [0x47497454, specifier(terms.objectAtIndex(i))]]);
+}}
+return "ok";'''
+        _run_and_check(body, sid)
+        return
+
+    body = f'''
+var t = {_target_expr(sid)};
+if (!t) return "NOTFOUND";
+sendEvent(0x47687374, 0x496e5478, [[0x2d2d2d2d, $.NSAppleEventDescriptor.descriptorWithString("{escaped}")], [0x47497454, specifier(t)]]);
+return "ok";'''
+    r = _run_and_check(body, sid)
+    if r.stdout.strip() == "NOTFOUND":
+        print(f"session not found: {sid}\nUse 'it2 session list' to see available sessions.",
+              file=sys.stderr)
+        sys.exit(1)
 
 
 def cmd_session_clear(args):
-    target = _applescript_target(args.session)
-    script = f'''
-tell application "Ghostty"
-  set t to {target}
-  send key "l" modifiers "control" action press to t
-  delay 0.05
-  send key "l" modifiers "control" action release to t
-end tell'''
-    _run_and_check(script)
+    sid = args.session or _self_session_id()
+    body = f'''
+var t = {_target_expr(sid)};
+if (!t) return "NOTFOUND";
+var spec = specifier(t);
+var key = $.NSAppleEventDescriptor.descriptorWithString("l");
+var mods = $.NSAppleEventDescriptor.descriptorWithString("control");
+sendEvent(0x47687374, 0x534b6579, [[0x2d2d2d2d, key], [0x474b654d, mods], [0x474b6541, $.NSAppleEventDescriptor.descriptorWithEnumCode(0x47497072)], [0x474b6554, spec]]);
+delay(0.05);
+sendEvent(0x47687374, 0x534b6579, [[0x2d2d2d2d, key], [0x474b654d, mods], [0x474b6541, $.NSAppleEventDescriptor.descriptorWithEnumCode(0x4749726c)], [0x474b6554, specifier(t)]]);
+return "ok";'''
+    r = _run_and_check(body, sid)
+    if r.stdout.strip() == "NOTFOUND":
+        print(f"session not found: {sid}\nUse 'it2 session list' to see available sessions.",
+              file=sys.stderr)
+        sys.exit(1)
 
 
 def cmd_session_focus(args):
@@ -224,25 +384,28 @@ def cmd_session_focus(args):
     if not session_id:
         sys.exit(0)
 
-    target = _applescript_target(session_id)
-    script = f'''
-tell application "Ghostty"
-  set t to {target}
-  focus t
-end tell'''
-    run_applescript(script)
+    body = f'''
+var t = resolve("{_escape_js(session_id)}");
+if (!t) return "NOTFOUND";
+sendEvent(0x47687374, 0x46637573, [[0x2d2d2d2d, specifier(t)]]);
+return "ok";'''
+    run_jxa(body, session_id)
 
 
 def cmd_session_close(args):
     if not args.session:
         sys.exit(0)
 
-    target = _applescript_target(args.session)
-    script = f'''
-tell application "Ghostty"
-  close ({target})
-end tell'''
-    _run_and_check(script)
+    body = f'''
+var t = resolve("{_escape_js(args.session)}");
+if (!t) return "NOTFOUND";
+sendEvent(0x47687374, 0x436c6f73, [[0x2d2d2d2d, specifier(t)]]);
+return "ok";'''
+    r = _run_and_check(body, args.session)
+    if r.stdout.strip() == "NOTFOUND":
+        print(f"session not found: {args.session}\nUse 'it2 session list' to see available sessions.",
+              file=sys.stderr)
+        sys.exit(1)
 
 
 
@@ -449,23 +612,28 @@ def _find_terminal_in_tree(tree, terminal_id):
 
 
 def _get_layout_data(tab=None, self_id=None):
-    """Get layout data via AppleScript (frame property on each terminal)."""
-    r = run_applescript('''
-tell application "Ghostty"
-  set tabCount to count of tabs of front window
-  set selIdx to index of selected tab of front window
-  set out to ""
-  repeat with t in (every tab of front window)
-    set tIdx to index of t
-    set tName to name of t
-    repeat with trm in (every terminal of t)
-      set f to frame of trm
-      if out is not "" then set out to out & linefeed
-      set out to out & tIdx & "\\t" & tName & "\\t" & (id of trm) & "\\t" & (name of trm) & "\\t" & (working directory of trm) & "\\t" & (x of f) & "\\t" & (y of f) & "\\t" & (w of f) & "\\t" & (h of f)
-    end repeat
-  end repeat
-  return (tabCount as text) & linefeed & (selIdx as text) & linefeed & out
-end tell''')
+    """Get layout data (frame property on each terminal)."""
+    body = '''
+var win = app.propertyWithCode(0x4746576e).get;
+if (!win) return "";
+var tabs = win.elementArrayWithCode(0x47746162);
+var selIdx = win.propertyWithCode(0x47577354).get.propertyWithCode(0x70696478).get.js;
+var lines = [tabs.count, selIdx];
+for (var j = 0; j < tabs.count; j++) {
+  var t = tabs.objectAtIndex(j);
+  var tIdx = t.propertyWithCode(0x70696478).get.js;
+  var tName = t.propertyWithCode(0x706e616d).get.js;
+  var terms = t.elementArrayWithCode(0x4774726d);
+  for (var k = 0; k < terms.count; k++) {
+    var trm = terms.objectAtIndex(k);
+    var f = trm.propertyWithCode(0x47546672).get;
+    lines.push([tIdx, tName, trm.propertyWithCode(0x49442020).get.js,
+      trm.propertyWithCode(0x706e616d).get.js, trm.propertyWithCode(0x47776472).get.js,
+      f.objectForKey("x").js, f.objectForKey("y").js, f.objectForKey("w").js, f.objectForKey("h").js].join("\\t"));
+  }
+}
+return lines.join("\\n");'''
+    r = run_jxa(body, self_id)
     if r.returncode != 0:
         return None
 
@@ -551,46 +719,41 @@ def cmd_session_layout(args):
 
 def cmd_session_tabs(args):
     my_id = _self_session_id()
-    my_id_escaped = _escape_applescript(my_id)
 
-    r = run_applescript(f'''
-tell application "Ghostty"
-  set tabCount to count of tabs of front window
-  set selIdx to index of selected tab of front window
-  set myTabIdx to 0
-  if "{my_id_escaped}" is not "" then
-    repeat with wi in (every window)
-      repeat with t in (every tab of wi)
-        repeat with trm in (every terminal of t)
-          if id of trm is "{my_id_escaped}" then
-            set myTabIdx to index of t
-            exit repeat
-          end if
-        end repeat
-        if myTabIdx > 0 then exit repeat
-      end repeat
-      if myTabIdx > 0 then exit repeat
-    end repeat
-  end if
-  set out to ""
-  repeat with i from 1 to tabCount
-    set t to tab i of front window
-    set tName to name of t
-    set termCount to count of terminals of t
-    set suffix to ""
-    if i is selIdx and i is myTabIdx then
-      set suffix to " (selected, current)"
-    else if i is selIdx then
-      set suffix to " (selected)"
-    else if i is myTabIdx then
-      set suffix to " (current)"
-    end if
-    set ln to i & "\\t" & tName & "\\t" & termCount & "\\t" & suffix
-    if i > 1 then set out to out & linefeed
-    set out to out & ln
-  end repeat
-  return out
-end tell''')
+    body = f'''
+var myId = "{_escape_js(my_id)}";
+var win = app.propertyWithCode(0x4746576e).get;
+if (!win) return "";
+var tabs = win.elementArrayWithCode(0x47746162);
+var selIdx = win.propertyWithCode(0x47577354).get.propertyWithCode(0x70696478).get.js;
+var myTabIdx = 0;
+if (myId) {{
+  var wins = app.elementArrayWithCode(0x47776e64);
+  for (var i = 0; i < wins.count && !myTabIdx; i++) {{
+    var wt = wins.objectAtIndex(i).elementArrayWithCode(0x47746162);
+    for (var j = 0; j < wt.count && !myTabIdx; j++) {{
+      var terms = wt.objectAtIndex(j).elementArrayWithCode(0x4774726d);
+      for (var k = 0; k < terms.count; k++) {{
+        if (terms.objectAtIndex(k).propertyWithCode(0x49442020).get.js === myId) {{
+          myTabIdx = wt.objectAtIndex(j).propertyWithCode(0x70696478).get.js;
+          break;
+        }}
+      }}
+    }}
+  }}
+}}
+var lines = [];
+for (var i = 0; i < tabs.count; i++) {{
+  var t = tabs.objectAtIndex(i);
+  var idx = t.propertyWithCode(0x70696478).get.js;
+  var suffix = "";
+  if (idx === selIdx && idx === myTabIdx) suffix = " (selected, current)";
+  else if (idx === selIdx) suffix = " (selected)";
+  else if (idx === myTabIdx) suffix = " (current)";
+  lines.push([idx, t.propertyWithCode(0x706e616d).get.js, t.elementArrayWithCode(0x4774726d).count, suffix].join("\\t"));
+}}
+return lines.join("\\n");'''
+    r = run_jxa(body, my_id or None)
     if r.returncode != 0:
         print(f"applescript error: {r.stderr.strip()}", file=sys.stderr)
         sys.exit(1)
@@ -611,13 +774,26 @@ end tell''')
         print(line)
 
 
+def _target_expr(session_id):
+    """JavaScript expression resolving the terminal an action applies to."""
+    if session_id:
+        return f'resolve("{_escape_js(session_id)}")'
+    return "resolve(null)"
+
+
 def cmd_session_read(args):
-    target = _applescript_target(args.session)
-    script = f'''
-tell application "Ghostty"
-  content of ({target})
-end tell'''
-    r = _run_and_check(script)
+    sid = args.session or _self_session_id()
+    body = f'''
+var t = {_target_expr(sid)};
+if (!t) return "NOTFOUND";
+var spec = specifier(t.propertyWithCode(0x4754636f));
+var reply = sendEvent(0x636f7265, 0x67657464, [[0x2d2d2d2d, spec]]);
+return replyValue(reply);'''
+    r = _run_and_check(body, sid)
+    if r.stdout.strip() == "NOTFOUND":
+        print(f"session not found: {sid}\nUse 'it2 session list' to see available sessions.",
+              file=sys.stderr)
+        sys.exit(1)
     lines = r.stdout.rstrip("\n").splitlines()
     n = getattr(args, "lines", None)
     if n is not None:
@@ -633,12 +809,18 @@ def cmd_session_capture(args):
               "content covers only the visible screen)", file=sys.stderr)
         sys.exit(1)
 
-    target = _applescript_target(args.session)
-    script = f'''
-tell application "Ghostty"
-  content of ({target})
-end tell'''
-    r = _run_and_check(script)
+    sid = args.session or _self_session_id()
+    body = f'''
+var t = {_target_expr(sid)};
+if (!t) return "NOTFOUND";
+var spec = specifier(t.propertyWithCode(0x4754636f));
+var reply = sendEvent(0x636f7265, 0x67657464, [[0x2d2d2d2d, spec]]);
+return replyValue(reply);'''
+    r = _run_and_check(body, sid)
+    if r.stdout.strip() == "NOTFOUND":
+        print(f"session not found: {sid}\nUse 'it2 session list' to see available sessions.",
+              file=sys.stderr)
+        sys.exit(1)
     lines = r.stdout.rstrip("\n").splitlines()
     with open(args.output, "w") as f:
         f.write("\n".join(lines))
@@ -646,14 +828,17 @@ end tell'''
 
 
 def cmd_session_set_name(args):
-    target = _applescript_target(args.session)
-    name_escaped = _escape_applescript(args.name)
-    script = f'''
-tell application "Ghostty"
-  set t to {target}
-  perform action "set_surface_title:{name_escaped}" on t
-end tell'''
-    _run_and_check(script)
+    sid = args.session or _self_session_id()
+    body = f'''
+var t = {_target_expr(sid)};
+if (!t) return "NOTFOUND";
+sendEvent(0x47687374, 0x50664163, [[0x2d2d2d2d, $.NSAppleEventDescriptor.descriptorWithString("set_surface_title:{_escape_js(args.name)}")], [0x476f6e54, specifier(t)]]);
+return "ok";'''
+    r = _run_and_check(body, sid)
+    if r.stdout.strip() == "NOTFOUND":
+        print(f"session not found: {sid}\nUse 'it2 session list' to see available sessions.",
+              file=sys.stderr)
+        sys.exit(1)
 
 
 def cmd_session_show(args):
@@ -662,36 +847,39 @@ def cmd_session_show(args):
         print("no session specified and ITERM_SESSION_ID not set", file=sys.stderr)
         sys.exit(1)
 
-    target = _applescript_target(self_id)
-    r = run_applescript(f'''
-tell application "Ghostty"
-  set t to {target}
-  set tId to id of t
-  set tName to name of t
-  set tCwd to working directory of t
-  set f to frame of t
-  -- find tab index and pane position
-  set tabIdx to 0
-  set paneIdx to 0
-  set paneCount to 0
-  repeat with wi in (every window)
-    repeat with tb in (every tab of wi)
-      set terms to every terminal of tb
-      set termCount to count of terms
-      repeat with j from 1 to termCount
-        if id of item j of terms is tId then
-          set tabIdx to index of tb
-          set paneIdx to j
-          set paneCount to termCount
-        end if
-      end repeat
-    end repeat
-  end repeat
-  return tId & "\\n" & tName & "\\n" & tCwd & "\\n" & (x of f) & "," & (y of f) & "," & (w of f) & "," & (h of f) & "\\n" & tabIdx & "\\n" & paneIdx & "\\n" & paneCount
-end tell''')
+    body = f'''
+var t = resolve("{_escape_js(self_id)}");
+if (!t) return "NOTFOUND";
+var tId = t.propertyWithCode(0x49442020).get.js;
+var tName = t.propertyWithCode(0x706e616d).get.js;
+var tCwd = t.propertyWithCode(0x47776472).get.js;
+var f = t.propertyWithCode(0x47546672).get;
+var frame = [f.objectForKey("x").js, f.objectForKey("y").js, f.objectForKey("w").js, f.objectForKey("h").js].join(",");
+var tabIdx = 0, paneIdx = 0, paneCount = 0;
+var wins = app.elementArrayWithCode(0x47776e64);
+for (var i = 0; i < wins.count; i++) {{
+  var tabs = wins.objectAtIndex(i).elementArrayWithCode(0x47746162);
+  for (var j = 0; j < tabs.count; j++) {{
+    var tb = tabs.objectAtIndex(j);
+    var terms = tb.elementArrayWithCode(0x4774726d);
+    for (var k = 0; k < terms.count; k++) {{
+      if (terms.objectAtIndex(k).propertyWithCode(0x49442020).get.js === tId) {{
+        tabIdx = tb.propertyWithCode(0x70696478).get.js;
+        paneIdx = k + 1;
+        paneCount = terms.count;
+      }}
+    }}
+  }}
+}}
+return [tId, tName, tCwd, frame, tabIdx, paneIdx, paneCount].join("\\n");'''
+    r = run_jxa(body, self_id)
     if r.returncode != 0:
-        msg = _friendly_error(r.stderr) or f"applescript error: {r.stderr.strip()}"
+        msg = _friendly_error(r.stderr, self_id) or f"applescript error: {r.stderr.strip()}"
         print(msg, file=sys.stderr)
+        sys.exit(1)
+    if r.stdout.strip() == "NOTFOUND":
+        print(f"session not found: {self_id}\nUse 'it2 session list' to see available sessions.",
+              file=sys.stderr)
         sys.exit(1)
 
     lines = r.stdout.strip().splitlines()
@@ -722,13 +910,17 @@ end tell''')
 
 
 def cmd_session_copy(args):
-    target = _applescript_target(args.session)
-    script = f'''
-tell application "Ghostty"
-  set t to {target}
-  perform action "copy_to_clipboard" on t
-end tell'''
-    _run_and_check(script)
+    sid = args.session or _self_session_id()
+    body = f'''
+var t = {_target_expr(sid)};
+if (!t) return "NOTFOUND";
+sendEvent(0x47687374, 0x50664163, [[0x2d2d2d2d, $.NSAppleEventDescriptor.descriptorWithString("copy_to_clipboard")], [0x476f6e54, specifier(t)]]);
+return "ok";'''
+    r = _run_and_check(body, sid)
+    if r.stdout.strip() == "NOTFOUND":
+        print(f"session not found: {sid}\nUse 'it2 session list' to see available sessions.",
+              file=sys.stderr)
+        sys.exit(1)
 
 
 # ── CLI definition ───────────────────────────────────────────────────
@@ -736,16 +928,13 @@ end tell'''
 def _session_id_completer(**_kwargs):
     """Tab-completion: return available Ghostty terminal IDs."""
     try:
-        r = run_applescript(
-            'tell application "Ghostty"\n'
-            '  set out to ""\n'
-            '  repeat with t in every terminal\n'
-            '    if out is not "" then set out to out & linefeed\n'
-            '    set out to out & (id of t)\n'
-            '  end repeat\n'
-            '  return out\n'
-            'end tell'
-        )
+        r = run_jxa('''
+var terms = app.elementArrayWithCode(0x4774726d);
+var lines = [];
+for (var i = 0; i < terms.count; i++) {
+  lines.push(terms.objectAtIndex(i).propertyWithCode(0x49442020).get.js);
+}
+return lines.join("\\n");''')
         if r.returncode == 0:
             return [s for s in r.stdout.strip().splitlines() if s]
     except Exception:
