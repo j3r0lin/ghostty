@@ -887,6 +887,47 @@ class TerminalWindow: NSWindow {
 
     // MARK: Positioning And Styling
 
+    override func encodeRestorableState(with coder: NSCoder) {
+        super.encodeRestorableState(with: coder)
+        // AppKit restores native fullscreen and the frame to return to on its own.
+        guard !styleMask.contains(.fullScreen), let screen else { return }
+        Self.encodeRestorableFrame(frame, screenFrame: screen.frame, to: coder)
+    }
+
+    override func restoreState(with coder: NSCoder) {
+        super.restoreState(with: coder)
+
+        // AppKit ends restoreState by applying the window's "last user
+        // layout", which it records when the window is first shown
+        // and does not update on programmatic or Accessibility moves (window
+        // managers, AppleScript). That replaces the frame it just restored with
+        // the window's size and position at creation, so we put the saved frame
+        // back.
+        guard let frame = Self.restorableFrame(
+            from: coder,
+            screenFrames: NSScreen.screens.map(\.frame)
+        ) else { return }
+        setFrame(frame, display: true)
+    }
+
+    private static let restorableFrameKey = "ghosttyWindowFrame"
+    private static let restorableScreenFrameKey = "ghosttyWindowScreenFrame"
+
+    static func encodeRestorableFrame(_ frame: NSRect, screenFrame: NSRect, to coder: NSCoder) {
+        coder.encode(frame, forKey: restorableFrameKey)
+        coder.encode(screenFrame, forKey: restorableScreenFrameKey)
+    }
+
+    /// The saved frame to restore, or nil when there is none or the screen it was
+    /// saved on is no longer attached: on a different display setup AppKit's own
+    /// placement is the better guess.
+    static func restorableFrame(from coder: NSCoder, screenFrames: [NSRect]) -> NSRect? {
+        guard coder.containsValue(forKey: restorableFrameKey),
+              screenFrames.contains(coder.decodeRect(forKey: restorableScreenFrameKey))
+        else { return nil }
+        return coder.decodeRect(forKey: restorableFrameKey)
+    }
+
     /// Update titlebarTextField's size and font
     func syncWindowTitleAppearance(font: NSFont? = nil) {
         titlebarTextFields.forEach { field in
