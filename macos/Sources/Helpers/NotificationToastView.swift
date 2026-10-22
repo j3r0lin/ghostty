@@ -14,7 +14,7 @@ struct NotificationToastView: View {
     @State private var isHovered: Bool = false
 
     var body: some View {
-        HStack(alignment: .center, spacing: 11.5) {
+        HStack(alignment: .center, spacing: 9.5) {
             iconView
 
             VStack(alignment: .leading, spacing: 0) {
@@ -38,7 +38,7 @@ struct NotificationToastView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.leading, 6)
+        .padding(.leading, 12)
         .padding(.trailing, 10)
         .padding(.top, 10)
         .padding(.bottom, 12)
@@ -66,7 +66,7 @@ struct NotificationToastView: View {
                         .clipShape(Circle())
                 )
                 .overlay(Circle().stroke(.primary.opacity(0.12), lineWidth: 0.5))
-                .offset(x: -7, y: -7)
+                .offset(x: 4, y: 4)
             }
         }
         .padding(12) // reserve space so shadow isn't clipped by panel bounds
@@ -85,7 +85,9 @@ struct NotificationToastView: View {
                 .resizable()
                 .interpolation(.high)
                 .aspectRatio(contentMode: .fit)
-                .frame(width: 44, height: 44)
+                .frame(width: 40, height: 40)
+                .scaleEffect(1.2)
+                .offset(y: 1)
         } else {
             ZStack {
                 RoundedRectangle(cornerRadius: 10)
@@ -96,7 +98,7 @@ struct NotificationToastView: View {
                     .foregroundStyle(.white)
                     .padding(9)
             }
-            .frame(width: 44, height: 44)
+            .frame(width: 40, height: 40)
         }
     }
 }
