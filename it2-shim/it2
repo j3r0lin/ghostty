@@ -10,6 +10,7 @@ import argparse
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -35,7 +36,12 @@ def _trace(msg):
         pass
 
 
-_GHOSTTY_COMM = "/Ghostty.app/Contents/MacOS/ghostty"
+_GHOSTTY_COMM_RE = re.compile(r"\.app/Contents/MacOS/ghostty(\s|$)")
+
+
+def _is_ghostty_command(command):
+    """True for any Ghostty build (Ghostty.app, Ghostty Dev.app, ...)."""
+    return bool(_GHOSTTY_COMM_RE.search(command))
 
 # Resolved once per invocation. None means "not yet"; an int is the chosen pid.
 _instance_pid = None
@@ -61,7 +67,7 @@ def _ghostty_pids():
         if not line:
             continue
         pid_str, _, command = line.partition(" ")
-        if _GHOSTTY_COMM in command:
+        if _is_ghostty_command(command):
             try:
                 pids.append(int(pid_str))
             except ValueError:
@@ -81,7 +87,7 @@ def _ancestor_ghostty_pid():
         if not lines:
             return None
         ppid_str, _, command = lines[-1].strip().partition(" ")
-        if _GHOSTTY_COMM in command:
+        if _is_ghostty_command(command):
             return pid
         try:
             pid = int(ppid_str)
@@ -993,13 +999,15 @@ for (var i = 0; i < windows.length; i++) {
   for (var j = 0; j < tabs.count; j++) {
     var tab = tabs.objectAtIndex(j);
     rows.push({id: idOf(tab), window_id: idOf(win), index: j,
-      sessions: tabs.objectAtIndex(j).elementArrayWithCode(0x4774726d).count,
+      sessions: Number(tabs.objectAtIndex(j).elementArrayWithCode(0x4774726d).count),
       is_active: !!tab.propertyWithCode(0x4754736c).get.js,
       name: tab.propertyWithCode(0x706e616d).get.js});
   }
 }
 return JSON.stringify(rows);'''
     rows = json.loads(_tab_run(body, sid))
+    for r in rows:
+        r["sessions"] = int(r["sessions"])
     if args.json:
         print(json.dumps(rows, indent=2))
     else:
@@ -1104,11 +1112,16 @@ def cmd_tab_select(args):
         body += "\nvar tabs = win.elementArrayWithCode(0x47746162);"
         if args.subcmd in ("next", "prev"):
             step = 1 if args.subcmd == "next" else -1
-            body += f'''
-if (!tabs.count) return 'ERROR:["No current tab",3]';
-var selected = win.propertyWithCode(0x47577354).get;
-if (!selected) return 'ERROR:["No current tab",3]';
-var index = (selected.propertyWithCode(0x70696478).get.js - 1 + {step} + tabs.count) % tabs.count;'''
+            probe = body + '''
+var count = Number(tabs.count);
+var cur = -1;
+for (var k = 0; k < count; k++) if (tabs.objectAtIndex(k).propertyWithCode(0x4754736c).get.js) { cur = k; break; }
+return JSON.stringify([cur, count]);'''
+            cur, count = (int(v) for v in json.loads(_tab_run(probe, sid)))
+            if cur < 0 or count < 1:
+                _tab_error("No current tab", 3)
+            index = (cur + step) % count
+            body += f"\nvar index = {index};"
         else:
             body += f"\nvar index = {index};"
         body += '''

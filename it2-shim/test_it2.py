@@ -9,6 +9,7 @@ import contextlib
 import importlib.machinery
 import importlib.util
 import io
+import json
 import os
 import sys
 import tempfile
@@ -106,6 +107,21 @@ class SessionFocusCloseInjectionTests(unittest.TestCase):
         escaped = '"' + it2._escape_js(MALICIOUS_ID) + '"'
         self.assertIn(escaped, body)
         self.assertNotIn(MALICIOUS_ID, body.replace(it2._escape_js(MALICIOUS_ID), ""))
+
+
+class InstanceRecognitionTests(unittest.TestCase):
+    def test_any_ghostty_app_bundle_is_recognised(self):
+        for cmd in ("/Applications/Ghostty.app/Contents/MacOS/ghostty",
+                    "/Users/x/build/ReleaseLocal/Ghostty Dev.app/Contents/MacOS/ghostty",
+                    "/Applications/Ghostty.app/Contents/MacOS/ghostty +foo"):
+            self.assertTrue(it2._is_ghostty_command(cmd), cmd)
+        for cmd in ("/usr/bin/vim", "/Applications/Ghostty.app/Contents/MacOS/ghostty-helper"):
+            self.assertFalse(it2._is_ghostty_command(cmd), cmd)
+
+    def test_ghostty_dev_pid_is_enumerated(self):
+        ps = "  10 /Applications/Ghostty.app/Contents/MacOS/ghostty\n 20 /x/Ghostty Dev.app/Contents/MacOS/ghostty\n 30 /bin/zsh\n"
+        with mock.patch.object(it2.subprocess, "run", return_value=mock.Mock(stdout=ps)):
+            self.assertEqual(it2._ghostty_pids(), [10, 20])
 
 
 class InstanceSelectionTests(unittest.TestCase):
@@ -218,13 +234,32 @@ class TabCommandTests(unittest.TestCase):
         for label in ("Tab ID", "Window ID", "Index", "Sessions", "Active", "Name", "shell"):
             self.assertIn(label, out)
 
+    def test_list_sessions_are_integers(self):
+        import json
+        rows = [{"id": "tab", "window_id": "win", "index": 0,
+                 "sessions": "1", "is_active": True, "name": "shell"}]
+        out, _ = self.invoke(["list", "--json"], json.dumps(rows))
+        self.assertEqual(json.loads(out)[0]["sessions"], 1)
+
+    def test_next_prev_step_from_the_selected_tab_and_wrap(self):
+        # (subcommand, selected index, tab count) -> index that gets selected
+        for sub, cur, count, expected in [("next", 2, 7, 3), ("prev", 2, 7, 1),
+                                          ("next", 6, 7, 0), ("prev", 0, 7, 6)]:
+            with self.subTest(sub=sub, cur=cur):
+                args = it2.build_parser().parse_args(["tab", sub])
+                replies = iter([json.dumps([cur, count]), str(expected)])
+                with mock.patch.object(it2, "run_jxa", side_effect=lambda *a, **k: mock.Mock(
+                        returncode=0, stdout=next(replies), stderr="")) as run, \
+                        contextlib.redirect_stdout(io.StringIO()) as out:
+                    args.func(args)
+                self.assertEqual(out.getvalue(), f"Switched to tab {expected}\n")
+                self.assertIn(f"var index = {expected};", run.call_args.args[0])
+
     def test_select_outputs(self):
         for argv, output, expected in [
                 (["select", "2"], "2", "Selected tab at index 2\n"),
                 (["select", "tab-id"], "1", "Selected tab: tab-id\n"),
-                (["goto", "0"], "0", "Switched to tab 0\n"),
-                (["next"], "0", "Switched to tab 0\n"),
-                (["prev"], "2", "Switched to tab 2\n")]:
+                (["goto", "0"], "0", "Switched to tab 0\n")]:
             with self.subTest(argv=argv):
                 self.assertEqual(self.invoke(argv, output)[0], expected)
 
