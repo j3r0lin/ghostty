@@ -69,3 +69,20 @@ cp -R zig-out/Ghostty.app /Applications/Ghostty.app
 | `it2` | Python CLI shim，映射 it2 命令到 Ghostty AppleScript |
 | `claude-code-it2-usage.md` | Claude Code 对 it2 CLI 的调用方式分析 |
 | `ghostty-applescript.md` | Ghostty AppleScript API 参考 |
+
+## Tab 命令
+
+| 命令 | 说明 |
+| --- | --- |
+| `it2 tab new [-w WIN_ID] [-c CMD]` | 新建 tab，输出 tab ID 和 terminal ID；CMD 通过 initial input 加换行发送，保留 shell |
+| `it2 tab list [--json] [-w WIN_ID]` | 列出所有窗口或指定窗口的 tab，含名称、terminal 数和选中状态 |
+| `it2 tab close [TAB_ID] [-f]` | 默认关闭调用者的 tab；交互时确认，非 tty 必须加 `-f` |
+| `it2 tab select TAB_ID_OR_INDEX [-w WIN_ID]` | 按 ID 或 0-based index 选中 tab |
+| `it2 tab next` / `it2 tab prev` | 在调用者所在窗口内循环切换 |
+| `it2 tab goto INDEX [-w WIN_ID]` | 按 0-based index 切换 |
+| `it2 tab move [TAB_ID]` | Ghostty 不支持，报错退出 |
+
+默认窗口通过 `ITERM_SESSION_ID` 定位，无法定位时用 front window。
+`next` / `prev` 从该窗口当前选中的 tab 开始切换。
+窗口或 tab 不存在时退出码为 3，index 越界为 4。
+`session tabs` 保持原有行为和 1-based 显示。

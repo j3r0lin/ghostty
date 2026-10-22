@@ -177,5 +177,85 @@ class SessionCaptureHistoryTests(unittest.TestCase):
                 self.assertEqual(f.read(), "screen contents")
 
 
+class TabCommandTests(unittest.TestCase):
+    def invoke(self, argv, output=""):
+        args = it2.build_parser().parse_args(["tab"] + argv)
+        with mock.patch.object(it2, "run_jxa", return_value=mock.Mock(
+                returncode=0, stdout=output, stderr="")) as run, contextlib.redirect_stdout(io.StringIO()) as out:
+            args.func(args)
+        return out.getvalue(), run
+
+    def test_parser_contract(self):
+        cases = [(["new", "-w", "win", "-c", "echo hi"], "new"),
+                 (["list", "--json", "-w", "win"], "list"),
+                 (["close", "tab-id", "-f"], "close"),
+                 (["select", "0", "-w", "win"], "select"),
+                 (["next"], "next"), (["prev"], "prev"),
+                 (["goto", "2", "-w", "win"], "goto"), (["move", "id"], "move")]
+        for argv, name in cases:
+            with self.subTest(argv=argv):
+                self.assertEqual(it2.build_parser().parse_args(["tab"] + argv).subcmd, name)
+        for argv in (["select"], ["goto", "abc"], ["new", "--unknown"]):
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as cm:
+                it2.build_parser().parse_args(["tab"] + argv)
+            self.assertEqual(cm.exception.code, 2)
+
+    def test_new_command_uses_initial_input(self):
+        out, run = self.invoke(["new", "-c", 'echo "hi"'], '["tab-id", "term-id"]')
+        self.assertEqual(out, "Created new tab: tab-id\nSession: term-id\n")
+        body = run.call_args.args[0]
+        self.assertIn("0x47536349", body)  # GScI: initial input
+        self.assertNotIn("0x47536343", body)  # GScC: command
+        self.assertIn(it2._escape_js('echo "hi"\n'), body)
+
+    def test_list_json_contract(self):
+        import json
+        rows = [{"id": "tab", "window_id": "win", "index": 0,
+                 "sessions": 2, "is_active": True, "name": "shell"}]
+        out, _ = self.invoke(["list", "--json"], json.dumps(rows))
+        self.assertEqual(json.loads(out), rows)
+        out, _ = self.invoke(["list"], json.dumps(rows))
+        for label in ("Tab ID", "Window ID", "Index", "Sessions", "Active", "Name", "shell"):
+            self.assertIn(label, out)
+
+    def test_select_outputs(self):
+        for argv, output, expected in [
+                (["select", "2"], "2", "Selected tab at index 2\n"),
+                (["select", "tab-id"], "1", "Selected tab: tab-id\n"),
+                (["goto", "0"], "0", "Switched to tab 0\n"),
+                (["next"], "0", "Switched to tab 0\n"),
+                (["prev"], "2", "Switched to tab 2\n")]:
+            with self.subTest(argv=argv):
+                self.assertEqual(self.invoke(argv, output)[0], expected)
+
+    def test_errors_preserve_contract(self):
+        import json
+        for argv, message, code in [
+                (["new", "-w", "missing"], "Window 'missing' not found", 3),
+                (["select", "missing"], "Tab 'missing' not found", 3),
+                (["goto", "-1"], "Tab index -1 out of range", 4)]:
+            with contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit) as cm:
+                self.invoke(argv, "ERROR:" + json.dumps([message, code]))
+            self.assertEqual(cm.exception.code, code)
+            self.assertEqual(err.getvalue().strip(), message)
+
+    def test_move_and_non_tty_close_never_run_jxa(self):
+        for argv in (["move"], ["move", "tab-id"], ["close"], ["close", "tab-id"]):
+            args = it2.build_parser().parse_args(["tab"] + argv)
+            with mock.patch.object(it2, "run_jxa") as run, mock.patch.object(sys.stdin, "isatty", return_value=False), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as cm:
+                args.func(args)
+            self.assertNotEqual(cm.exception.code, 0)
+            run.assert_not_called()
+
+    def test_force_close(self):
+        with mock.patch.object(sys.stdin, "isatty", return_value=False):
+            out, _ = self.invoke(["close", "tab-id", "-f"], "tab-id")
+        self.assertEqual(out, "Tab closed\n")
+
+    def test_tty_close_decline(self):
+        with mock.patch.object(sys.stdin, "isatty", return_value=True), mock.patch("builtins.input", return_value="n"), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            self.invoke(["close", "tab-id"], "tab-id")
+
+
 if __name__ == "__main__":
     unittest.main()

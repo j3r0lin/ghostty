@@ -176,3 +176,21 @@ split stdout → 正则提取 sessionId → 存入 fg 数组
                         focus -s <id> ← 切换焦点
                         split -s <id> ← 下一个 teammate 从此分屏
 ```
+
+## Shim 额外提供的 tab 命令
+
+以下是 shim 的独立命令组，不属于上文记录的 Claude Code 调用清单：
+
+```bash
+it2 tab new [-w WIN_ID] [-c CMD]
+it2 tab list [--json] [-w WIN_ID]
+it2 tab close [TAB_ID] [-f]
+it2 tab select TAB_ID_OR_INDEX [-w WIN_ID]
+it2 tab next
+it2 tab prev
+it2 tab goto INDEX [-w WIN_ID]
+it2 tab move [TAB_ID]  # Ghostty 不支持，报错退出
+```
+
+Tab index 为 0-based；默认窗口通过调用者 session 定位，失败时使用 front window。
+非 tty 关闭 tab 必须显式传 `-f`。

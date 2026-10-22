@@ -923,6 +923,209 @@ return "ok";'''
         sys.exit(1)
 
 
+# ── tab commands ────────────────────────────────────────────────────
+
+def _tab_context():
+    sid = _self_session_id()
+    return sid, f'''
+var caller = {_target_expr(sid)};
+var wins = app.elementArrayWithCode(0x47776e64);
+var currentWin = app.propertyWithCode(0x4746576e).get;
+var currentTab = null;
+function idOf(obj) {{ return obj.propertyWithCode(0x49442020).get.js; }}
+for (var wi = 0; caller && wi < wins.count; wi++) {{
+  var w = wins.objectAtIndex(wi);
+  var ts = w.elementArrayWithCode(0x47746162);
+  for (var ti = 0; ti < ts.count; ti++) {{
+    var tab = ts.objectAtIndex(ti);
+    var terms = tab.elementArrayWithCode(0x4774726d);
+    for (var si = 0; si < terms.count; si++) {{
+      if (idOf(terms.objectAtIndex(si)) === idOf(caller)) {{ currentWin = w; currentTab = tab; }}
+    }}
+  }}
+}}
+if (!currentTab && currentWin) currentTab = currentWin.propertyWithCode(0x47577354).get;
+function windowById(id) {{
+  for (var i = 0; i < wins.count; i++) if (idOf(wins.objectAtIndex(i)) === id) return wins.objectAtIndex(i);
+  return null;
+}}
+function tabById(id) {{
+  for (var i = 0; i < wins.count; i++) {{
+    var tabs = wins.objectAtIndex(i).elementArrayWithCode(0x47746162);
+    for (var j = 0; j < tabs.count; j++) if (idOf(tabs.objectAtIndex(j)) === id) return tabs.objectAtIndex(j);
+  }}
+  return null;
+}}
+'''
+
+
+def _tab_error(message, code=3):
+    print(message, file=sys.stderr)
+    sys.exit(code)
+
+
+def _tab_run(body, sid):
+    output = _run_and_check(body, sid or None).stdout.strip()
+    if output.startswith("ERROR:"):
+        error = json.loads(output[6:])
+        _tab_error(error[0], error[1])
+    return output
+
+
+def _tab_window(window):
+    if window is not None:
+        return f'''var win = windowById("{_escape_js(window)}");
+if (!win) return "ERROR:" + JSON.stringify(["Window '" + "{_escape_js(window)}" + "' not found", 3]);'''
+    return 'var win = currentWin; if (!win) return \'ERROR:["No current window",3]\';'
+
+
+def cmd_tab_list(args):
+    sid, body = _tab_context()
+    if args.window is not None:
+        body += _tab_window(args.window) + "\nvar windows = [win];"
+    else:
+        body += "\nvar windows = []; for (var i = 0; i < wins.count; i++) windows.push(wins.objectAtIndex(i));"
+    body += '''
+var rows = [];
+for (var i = 0; i < windows.length; i++) {
+  var win = windows[i];
+  var tabs = win.elementArrayWithCode(0x47746162);
+  for (var j = 0; j < tabs.count; j++) {
+    var tab = tabs.objectAtIndex(j);
+    rows.push({id: idOf(tab), window_id: idOf(win), index: j,
+      sessions: tabs.objectAtIndex(j).elementArrayWithCode(0x4774726d).count,
+      is_active: !!tab.propertyWithCode(0x4754736c).get.js,
+      name: tab.propertyWithCode(0x706e616d).get.js});
+  }
+}
+return JSON.stringify(rows);'''
+    rows = json.loads(_tab_run(body, sid))
+    if args.json:
+        print(json.dumps(rows, indent=2))
+    else:
+        table = [["Tab ID", "Window ID", "Index", "Sessions", "Active", "Name"]]
+        table += [[str(r["id"]), str(r["window_id"]), str(r["index"]),
+                   str(r["sessions"]), "✓" if r["is_active"] else "", r["name"]] for r in rows]
+        widths = [max(len(row[i]) for row in table) for i in range(6)]
+        for row in table:
+            print("  ".join(value.ljust(width) for value, width in zip(row, widths)).rstrip())
+
+
+def cmd_tab_new(args):
+    sid, body = _tab_context()
+    body += _tab_window(args.window)
+    body += '''
+var tabs = win.elementArrayWithCode(0x47746162);
+var before = [];
+for (var i = 0; i < tabs.count; i++) before.push(idOf(tabs.objectAtIndex(i)));
+var params = [[0x474e7457, specifier(win)]];
+'''
+    if args.command is not None:
+        initial = _escape_js(args.command + "\n")
+        body += f'''
+var cfgEv = sendEvent(0x47687374, 0x4e534366, []);
+var cfg = cfgEv.descriptorForKeyword(0x2d2d2d2d);
+if (!cfg) return 'ERROR:["Failed to create surface configuration",1]';
+cfg.setDescriptorForKeyword($.NSAppleEventDescriptor.descriptorWithString("{initial}"), 0x47536349);
+params.push([0x474e7453, cfg]);
+'''
+    body += '''
+var reply = sendEvent(0x47687374, 0x4e546162, params);
+var newId = "";
+if (reply) {
+  for (var di = 1; di <= reply.numberOfItems; di++) {
+    if (reply.keywordForDescriptorAtIndex(di) !== 0x2d2d2d2d) continue;
+    var newSpec = reply.descriptorAtIndex(di);
+    for (var i = 1; i <= newSpec.numberOfItems; i++) {
+      if (newSpec.keywordForDescriptorAtIndex(i) === 0x73656c64) {
+        var seld = newSpec.descriptorAtIndex(i);
+        newId = seld.stringValue ? seld.stringValue.js : "";
+      }
+    }
+  }
+}
+var after = win.elementArrayWithCode(0x47746162);
+var created = null;
+for (var i = 0; i < after.count; i++) {
+  var candidate = after.objectAtIndex(i);
+  var id = idOf(candidate);
+  if ((newId && id === newId) || (!newId && before.indexOf(id) < 0)) { created = candidate; break; }
+}
+if (!created) return 'ERROR:["Failed to create tab",1]';
+var terminal = created.propertyWithCode(0x47546654).get;
+if (!terminal) return 'ERROR:["New tab has no focused terminal",1]';
+return JSON.stringify([idOf(created), idOf(terminal)]);'''
+    tab_id, terminal_id = json.loads(_tab_run(body, sid))
+    print(f"Created new tab: {tab_id}")
+    print(f"Session: {terminal_id}")
+
+
+def _tab_target(tab_id):
+    if tab_id is None:
+        return 'var tab = currentTab; if (!tab) return \'ERROR:["No current tab",3]\';'
+    escaped = _escape_js(tab_id)
+    return f'''var tab = tabById("{escaped}");
+if (!tab) return "ERROR:" + JSON.stringify(["Tab '" + "{escaped}" + "' not found", 3]);'''
+
+
+def cmd_tab_close(args):
+    if not args.force and not sys.stdin.isatty():
+        _tab_error("Closing a tab requires --force when stdin is not a tty", 1)
+    sid, body = _tab_context()
+    target = _tab_target(args.tab_id)
+    tab_id = _tab_run(body + target + "\nreturn idOf(tab);", sid)
+    if not args.force:
+        print(f"Close tab {tab_id}? [y/N] ", end="", flush=True, file=sys.__stderr__)
+        try:
+            confirmed = input().strip().lower() in ("y", "yes")
+        except EOFError:
+            confirmed = False
+        if not confirmed:
+            _tab_error("Aborted!", 1)
+    _tab_run(body + _tab_target(tab_id) + '''
+sendEvent(0x47687374, 0x436c5462, [[0x2d2d2d2d, specifier(tab)]]);
+return "";''', sid)
+    print("Tab closed")
+
+
+def cmd_tab_select(args):
+    sid, body = _tab_context()
+    index = None
+    if args.subcmd == "select":
+        try:
+            index = int(args.tab_id_or_index)
+        except ValueError:
+            body += _tab_target(args.tab_id_or_index)
+            message = f"Selected tab: {args.tab_id_or_index}"
+    elif args.subcmd == "goto":
+        index = args.index
+    if index is not None or args.subcmd in ("next", "prev"):
+        body += _tab_window(getattr(args, "window", None))
+        body += "\nvar tabs = win.elementArrayWithCode(0x47746162);"
+        if args.subcmd in ("next", "prev"):
+            step = 1 if args.subcmd == "next" else -1
+            body += f'''
+if (!tabs.count) return 'ERROR:["No current tab",3]';
+var selected = win.propertyWithCode(0x47577354).get;
+if (!selected) return 'ERROR:["No current tab",3]';
+var index = (selected.propertyWithCode(0x70696478).get.js - 1 + {step} + tabs.count) % tabs.count;'''
+        else:
+            body += f"\nvar index = {index};"
+        body += '''
+if (index < 0 || index >= tabs.count) return "ERROR:" + JSON.stringify(["Tab index " + index + " out of range", 4]);
+var tab = tabs.objectAtIndex(index);'''
+        message = f"Selected tab at index {index}" if args.subcmd == "select" else None
+    body += '''
+sendEvent(0x47687374, 0x536c5462, [[0x2d2d2d2d, specifier(tab)]]);
+return String(tab.propertyWithCode(0x70696478).get.js - 1);'''
+    result = _tab_run(body, sid)
+    print(message if message is not None else f"Switched to tab {result}")
+
+
+def cmd_tab_move(args):
+    _tab_error("tab move is not supported on Ghostty", 1)
+
+
 # ── CLI definition ───────────────────────────────────────────────────
 
 def _session_id_completer(**_kwargs):
@@ -942,6 +1145,27 @@ return lines.join("\\n");''')
     return []
 
 
+def _tab_id_completer(**_kwargs):
+    return _element_id_completer(0x47746162)
+
+
+def _window_id_completer(**_kwargs):
+    return _element_id_completer(0x47776e64)
+
+
+def _element_id_completer(code):
+    try:
+        r = run_jxa(f'''var items = app.elementArrayWithCode({code});
+var ids = [];
+for (var i = 0; i < items.count; i++) ids.push(items.objectAtIndex(i).propertyWithCode(0x49442020).get.js);
+return ids.join("\\n");''')
+        if r.returncode == 0:
+            return r.stdout.strip().splitlines()
+    except Exception:
+        pass
+    return []
+
+
 def _attach_session_completer(parser):
     """Recursively attach session-id completer to every -s/--session arg."""
     for action in parser._actions:
@@ -950,6 +1174,10 @@ def _attach_session_completer(parser):
                 _attach_session_completer(sub_parser)
         elif "-s" in action.option_strings or "--session" in action.option_strings:
             action.completer = _session_id_completer
+        elif "--window" in action.option_strings:
+            action.completer = _window_id_completer
+        elif action.dest in ("tab_id", "tab_id_or_index"):
+            action.completer = _tab_id_completer
 
 
 def build_parser():
@@ -1042,6 +1270,35 @@ def build_parser():
     p = sub.add_parser("copy", help="copy selection to clipboard")
     p.add_argument("-s", "--session", metavar="ID", help="target terminal (default: focused)")
     p.set_defaults(func=cmd_session_copy)
+
+    tab = sp.add_parser("tab", help="manage terminal tabs")
+    tabs = tab.add_subparsers(dest="subcmd", help="tab subcommand")
+    for name, handler, help_text in (
+        ("new", cmd_tab_new, "create new tab"),
+        ("list", cmd_tab_list, "list all tabs"),
+        ("close", cmd_tab_close, "close tab"),
+        ("select", cmd_tab_select, "select tab by ID or 0-based index"),
+        ("next", cmd_tab_select, "switch to next tab"),
+        ("prev", cmd_tab_select, "switch to previous tab"),
+        ("goto", cmd_tab_select, "go to tab by 0-based index"),
+        ("move", cmd_tab_move, "unsupported on Ghostty"),
+    ):
+        p = tabs.add_parser(name, help=help_text)
+        p.set_defaults(func=handler)
+        if name in ("new", "list", "select", "goto"):
+            p.add_argument("-w", "--window", metavar="WIN_ID", help="target window ID")
+        if name == "new":
+            p.add_argument("-c", "--command", metavar="CMD", help="input to send after launch")
+        elif name == "list":
+            p.add_argument("--json", action="store_true", help="output as JSON")
+        elif name in ("close", "move"):
+            p.add_argument("tab_id", nargs="?", metavar="TAB_ID", help="tab ID (default: caller's tab)")
+            if name == "close":
+                p.add_argument("-f", "--force", action="store_true", help="close without confirmation")
+        elif name == "select":
+            p.add_argument("tab_id_or_index", metavar="TAB_ID_OR_INDEX")
+        elif name == "goto":
+            p.add_argument("index", type=int, metavar="INDEX")
 
     return top
 
