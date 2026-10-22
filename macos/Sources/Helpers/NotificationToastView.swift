@@ -85,8 +85,8 @@ struct NotificationToastView: View {
                 .resizable()
                 .interpolation(.high)
                 .aspectRatio(contentMode: .fit)
+                .frame(width: 48, height: 48)
                 .frame(width: 40, height: 40)
-                .scaleEffect(1.2)
                 .offset(y: 1)
         } else {
             ZStack {
@@ -98,7 +98,9 @@ struct NotificationToastView: View {
                     .foregroundStyle(.white)
                     .padding(9)
             }
+            .frame(width: 38, height: 38)
             .frame(width: 40, height: 40)
+            .offset(y: 1)
         }
     }
 }
