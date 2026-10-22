@@ -12,7 +12,25 @@ struct NotificationToastView: View {
     var onClose: () -> Void = {}
     var onHoverChange: (Bool) -> Void = { _ in }
     @State private var isHovered: Bool = false
+    @Environment(\.colorScheme) private var colorScheme
     private let cornerRadius: CGFloat = 20
+    private var isDark: Bool { colorScheme == .dark }
+
+    // 深色下的材质、叠色、描边和阴影，是在本机 2x 屏幕的深（灰 38）、浅（灰 217）两种背景上
+    // 对照系统横幅取样标定的：填充 43 / 67，描边为填充上叠 15% 白；叠色用来压低材质对背景亮度的敏感度。
+    @ViewBuilder
+    private var cardBackground: some View {
+        if isDark {
+            ZStack {
+                NotificationVisualEffectBlur(material: .headerView, blendingMode: .behindWindow)
+                Color(white: 0.16).opacity(0.28)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+        } else {
+            NotificationVisualEffectBlur(material: .menu, blendingMode: .behindWindow)
+                .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+        }
+    }
 
     // 按 Claude 图标透明边标定：48/40 pt 绘制与布局框、下移 1 pt、间隔 9.5 pt，
     // 使可见图标为 38 pt、距卡片左侧 13 pt，文字起点为 61.5 pt。
@@ -46,15 +64,18 @@ struct NotificationToastView: View {
         .padding(.top, 10)
         .padding(.bottom, 12)
         .frame(width: 344, alignment: .leading)
-        .background(
-            NotificationVisualEffectBlur(material: .menu, blendingMode: .behindWindow)
-                .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
-        )
+        .background(cardBackground)
         .overlay(
             RoundedRectangle(cornerRadius: cornerRadius)
-                .stroke(Color.primary.opacity(0.12), lineWidth: 0.5)
+                .strokeBorder(isDark ? Color.white.opacity(0.15) : Color.primary.opacity(0.12), lineWidth: isDark ? 1 : 0.5)
         )
-        .shadow(color: .black.opacity(0.18), radius: 8, x: 0, y: 3)
+        .overlay(
+            // 系统横幅在卡片外侧还有 1 px 暗线，画在边界之外。
+            RoundedRectangle(cornerRadius: cornerRadius)
+                .inset(by: -0.25)
+                .stroke(Color.black.opacity(isDark ? 0.27 : 0), lineWidth: 0.5)
+        )
+        .shadow(color: .black.opacity(isDark ? 0.4 : 0.18), radius: isDark ? 5 : 8, x: 0, y: isDark ? 1 : 3)
         .overlay(alignment: .topLeading) {
             if isHovered {
                 Button(action: onClose) {
