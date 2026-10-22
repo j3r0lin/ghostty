@@ -12,7 +12,10 @@ struct NotificationToastView: View {
     var onClose: () -> Void = {}
     var onHoverChange: (Bool) -> Void = { _ in }
     @State private var isHovered: Bool = false
+    private let cornerRadius: CGFloat = 20
 
+    // 按 Claude 图标透明边标定：48/40 pt 绘制与布局框、下移 1 pt、间隔 9.5 pt，
+    // 使可见图标为 38 pt、距卡片左侧 13 pt，文字起点为 61.5 pt。
     var body: some View {
         HStack(alignment: .center, spacing: 9.5) {
             iconView
@@ -45,10 +48,10 @@ struct NotificationToastView: View {
         .frame(width: 344, alignment: .leading)
         .background(
             NotificationVisualEffectBlur(material: .menu, blendingMode: .behindWindow)
-                .clipShape(RoundedRectangle(cornerRadius: 20))
+                .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 20)
+            RoundedRectangle(cornerRadius: cornerRadius)
                 .stroke(Color.primary.opacity(0.12), lineWidth: 0.5)
         )
         .shadow(color: .black.opacity(0.18), radius: 8, x: 0, y: 3)
@@ -70,7 +73,7 @@ struct NotificationToastView: View {
             }
         }
         .padding(12) // reserve space so shadow isn't clipped by panel bounds
-        .contentShape(RoundedRectangle(cornerRadius: 20))
+        .contentShape(RoundedRectangle(cornerRadius: cornerRadius))
         .onTapGesture(perform: onClick)
         .onHover { hovering in
             isHovered = hovering

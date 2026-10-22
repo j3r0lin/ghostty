@@ -28,6 +28,8 @@ final class NotificationToastManager {
     private let stackGap: CGFloat = 4
     /// Inset from the screen edges, in points.
     private let edgeInset: CGFloat = 16
+    /// macOS 14 系统横幅距 visibleFrame 顶边的实测值，单位为 pt。
+    private let topInset: CGFloat = 17
 
     /// Look up a surface by its UUID (set by the integration layer).
     var surfaceLookup: ((UUID) -> Ghostty.SurfaceView?)?
@@ -156,7 +158,7 @@ final class NotificationToastManager {
     private func positionPanels() {
         guard let screen = NSScreen.main else { return }
         let frame = screen.visibleFrame
-        var topY = frame.maxY - 17
+        var topY = frame.maxY - topInset
 
         for entry in entries {
             let panelW = entry.panel.frame.width
