@@ -2019,6 +2019,7 @@ extension Ghostty {
 
             self.savedAgentArgv = argv
             self.savedAgentSessionID = agentSessionID
+            AppDelegate.logger.notice("decoded surface uuid=\(uuid?.uuidString ?? "nil", privacy: .public) pwd=\(config.workingDirectory ?? "nil", privacy: .public) agentSessionID=\(agentSessionID != nil)")
         }
 
         func encode(to encoder: Encoder) throws {
@@ -2032,6 +2033,12 @@ extension Ghostty {
             if let agent = detectedAgentSession, let sessionID = currentClaudeSessionID() {
                 try container.encode(agent.argv, forKey: .agentArgv)
                 try container.encode(sessionID, forKey: .agentSessionID)
+                AppDelegate.logger.notice("encoded surface uuid=\(self.id.uuidString, privacy: .public) pwd=\(self.pwd ?? "nil", privacy: .public) agentSession=true")
+            } else {
+                let reason = self.detectedAgentSession == nil
+                    ? "no agent detected"
+                    : "agent detected but no running session record in ~/.claude/ghostty"
+                AppDelegate.logger.notice("encoded surface uuid=\(self.id.uuidString, privacy: .public) pwd=\(self.pwd ?? "nil", privacy: .public) agentSession=false reason=\(reason, privacy: .public)")
             }
         }
 

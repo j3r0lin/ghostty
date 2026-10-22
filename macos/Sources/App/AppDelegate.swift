@@ -217,6 +217,13 @@ class AppDelegate: NSObject,
         // AppKit restores windows between willFinishLaunching and
         // didFinishLaunching. Running this any later would delete the files
         // this launch's restoration just wrote.
+        if let bundleID = Bundle.main.bundleIdentifier {
+            let home = FileManager.default.homeDirectoryForCurrentUser
+            TerminalWindowRestoration.backupSavedState(
+                from: home.appendingPathComponent("Library/Saved Application State/\(bundleID).savedState", isDirectory: true),
+                to: home.appendingPathComponent("Library/Application Support/\(bundleID)/restore-evidence", isDirectory: true),
+                keeping: 5)
+        }
         TerminalWindowRestoration.removeRestoreFiles()
     }
 

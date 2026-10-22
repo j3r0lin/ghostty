@@ -3,6 +3,10 @@ import Cocoa
 struct QuickTerminalRestorableState: TerminalRestorable {
     static var version: Int { 1 }
 
+    var restorationSurfaceIDs: [String] {
+        surfaceTree.map { $0.id.uuidString }
+    }
+
     var focusedSurface: String? {
         internalState.focusedSurface
     }

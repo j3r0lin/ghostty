@@ -11,6 +11,7 @@ protocol TerminalRestorable: Codable {
     /// Returns a base configuration to use when restoring terminal surfaces.
     /// Override this to provide custom environment variables or other configuration.
     var baseConfig: Ghostty.SurfaceConfiguration? { get }
+    var restorationSurfaceIDs: [String] { get }
 }
 
 extension TerminalRestorable {
@@ -29,6 +30,7 @@ extension TerminalRestorable {
 
     /// Default implementation returns nil (no custom base config).
     var baseConfig: Ghostty.SurfaceConfiguration? { nil }
+    var restorationSurfaceIDs: [String] { [] }
 
     init?(coder aDecoder: NSCoder) {
         // If the version doesn't match then we can't decode. In the future we can perform
@@ -52,7 +54,7 @@ extension TerminalRestorable {
         coder.encode(Self.version, forKey: Self.versionKey)
         coder.encode(CodableBridge(self), forKey: Self.selfKey)
 
-        AppDelegate.logger.debug("saved terminal state: \(debugDescription, privacy: .public)")
+        AppDelegate.logger.notice("saved terminal state: \(debugDescription, privacy: .public) surfaces=\(restorationSurfaceIDs.joined(separator: ","), privacy: .public)")
     }
 }
 
@@ -60,6 +62,10 @@ extension TerminalRestorable {
 final class TerminalRestorableState: TerminalRestorable {
     static var version: Int { 8 }
     static var minimumVersion: Int { 5 }
+
+    var restorationSurfaceIDs: [String] {
+        surfaceTree.map { $0.id.uuidString }
+    }
 
     var focusedSurface: String? {
         internalState.focusedSurface
@@ -124,6 +130,7 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
     ) {
         // Verify the identifier is what we expect
         guard identifier == .init(String(describing: Self.self)) else {
+            AppDelegate.logger.notice("window restoration skipped: unknown window identifier")
             completionHandler(nil, TerminalRestoreError.identifierUnknown)
             return
         }
@@ -131,6 +138,7 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
         // The app delegate is definitely setup by now. If it isn't our AppDelegate
         // then something is royally fucked up but protect against it anyhow.
         guard let appDelegate = NSApplication.shared.delegate as? AppDelegate else {
+            AppDelegate.logger.notice("window restoration skipped: invalid app delegate")
             completionHandler(nil, TerminalRestoreError.delegateInvalid)
             return
         }
@@ -140,13 +148,14 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
         // because window restoration is only ever invoked on app start so we
         // don't have to deal with config reloads.
         if appDelegate.ghostty.config.windowSaveState == "never" {
-            AppDelegate.logger.warning("skip restoration: window-save-state=never")
+            AppDelegate.logger.notice("skip restoration: window-save-state=never")
             completionHandler(nil, nil)
             return
         }
 
         // Decode the state. If we can't decode the state, then we can't restore.
         guard let state = TerminalRestorableState(coder: state) else {
+            AppDelegate.logger.notice("window restoration skipped: state decode failed")
             completionHandler(nil, TerminalRestoreError.stateDecodeFailed)
             return
         }
@@ -159,6 +168,7 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
             appDelegate.ghostty,
             withSurfaceTree: state.surfaceTree)
         guard let window = c.window else {
+            AppDelegate.logger.notice("window restoration skipped: window did not load")
             completionHandler(nil, TerminalRestoreError.windowDidNotLoad)
             return
         }
@@ -199,6 +209,7 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
             }
         }
 
+        AppDelegate.logger.notice("restored terminal window surfaces=\(c.surfaceTree.map { $0.id.uuidString }.joined(separator: ","), privacy: .public)")
         completionHandler(window, nil)
         guard let mode = state.effectiveFullscreenMode, mode != .native else {
             // We let AppKit handle native fullscreen
@@ -290,7 +301,12 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
 
     private static func writeRestoreFile(_ command: String, forSurfaceID id: UUID) {
         let file = restoreFileDirectory.appendingPathComponent("\(id.uuidString).restore")
-        try? command.write(to: file, atomically: true, encoding: .utf8)
+        do {
+            try command.write(to: file, atomically: true, encoding: .utf8)
+            AppDelegate.logger.notice("wrote restore file surface=\(id.uuidString, privacy: .public) path=\(file.path, privacy: .public)")
+        } catch {
+            AppDelegate.logger.notice("failed to write restore file surface=\(id.uuidString, privacy: .public) path=\(file.path, privacy: .public): \(error, privacy: .public)")
+        }
     }
 
     /// Deletes restore files left by a previous launch. Only the zsh shell
@@ -298,11 +314,44 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
     /// before the shell starts. Surface IDs survive restoration, so a leftover
     /// file would resume a stale session the next time that surface starts zsh.
     static func removeRestoreFiles(in dir: URL = restoreFileDirectory) {
-        guard let files = try? FileManager.default.contentsOfDirectory(
+        let files = (try? FileManager.default.contentsOfDirectory(
             at: dir, includingPropertiesForKeys: nil
-        ) else { return }
+        )) ?? []
+        var removed = 0
         for file in files where file.pathExtension == "restore" {
-            try? FileManager.default.removeItem(at: file)
+            do {
+                try FileManager.default.removeItem(at: file)
+                removed += 1
+            } catch {
+                AppDelegate.logger.notice("failed to remove restore file path=\(file.path, privacy: .public): \(error, privacy: .public)")
+            }
+        }
+        AppDelegate.logger.notice("removed restore files count=\(removed) path=\(dir.path, privacy: .public)")
+    }
+
+    static func backupSavedState(from source: URL, to root: URL, keeping count: Int) {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: source.path) else {
+            AppDelegate.logger.notice("savedState backup skipped: source directory missing path=\(source.path, privacy: .public)")
+            return
+        }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        let destination = root.appendingPathComponent(formatter.string(from: Date()), isDirectory: true)
+        do {
+            try fm.createDirectory(at: root, withIntermediateDirectories: true)
+            try fm.copyItem(at: source, to: destination)
+            AppDelegate.logger.notice("savedState backup copied source=\(source.path, privacy: .public) destination=\(destination.path, privacy: .public)")
+            let backups = try fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey])
+                .filter { try $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true }
+                .sorted { $0.lastPathComponent > $1.lastPathComponent }
+            for old in backups.dropFirst(max(0, count)) {
+                try fm.removeItem(at: old)
+            }
+        } catch {
+            AppDelegate.logger.notice("savedState backup failed source=\(source.path, privacy: .public) destination=\(destination.path, privacy: .public): \(error, privacy: .public)")
         }
     }
 
