@@ -14,22 +14,16 @@ struct NotificationToastView: View {
     @State private var isHovered: Bool = false
     @Environment(\.colorScheme) private var colorScheme
     private let cornerRadius: CGFloat = 20
-    private var isDark: Bool { colorScheme == .dark }
+    private var chrome: ToastChrome { ToastChrome(isDark: colorScheme == .dark) }
 
-    // 深色下的材质、叠色、描边和阴影，是在本机 2x 屏幕的深（灰 38）、浅（灰 217）两种背景上
-    // 对照系统横幅取样标定的：填充 43 / 67，描边为填充上叠 15% 白；叠色用来压低材质对背景亮度的敏感度。
-    @ViewBuilder
     private var cardBackground: some View {
-        if isDark {
-            ZStack {
-                NotificationVisualEffectBlur(material: .headerView, blendingMode: .behindWindow)
-                Color(white: 0.16).opacity(0.28)
+        ZStack {
+            NotificationVisualEffectBlur(material: chrome.material, blendingMode: .behindWindow)
+            if let tint = chrome.tint {
+                tint
             }
-            .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
-        } else {
-            NotificationVisualEffectBlur(material: .menu, blendingMode: .behindWindow)
-                .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
         }
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
     }
 
     // 按 Claude 图标透明边标定：48/40 pt 绘制与布局框、下移 1 pt、间隔 9.5 pt，
@@ -65,17 +59,9 @@ struct NotificationToastView: View {
         .padding(.bottom, 12)
         .frame(width: 344, alignment: .leading)
         .background(cardBackground)
-        .overlay(
-            RoundedRectangle(cornerRadius: cornerRadius)
-                .strokeBorder(isDark ? Color.white.opacity(0.15) : Color.primary.opacity(0.12), lineWidth: isDark ? 1 : 0.5)
-        )
-        .overlay(
-            // 系统横幅在卡片外侧还有 1 px 暗线，画在边界之外。
-            RoundedRectangle(cornerRadius: cornerRadius)
-                .inset(by: -0.25)
-                .stroke(Color.black.opacity(isDark ? 0.27 : 0), lineWidth: 0.5)
-        )
-        .shadow(color: .black.opacity(isDark ? 0.4 : 0.18), radius: isDark ? 5 : 8, x: 0, y: isDark ? 1 : 3)
+        .overlay(border)
+        .overlay(outerLine)
+        .shadow(color: chrome.shadowColor, radius: chrome.shadowRadius, x: 0, y: chrome.shadowY)
         .overlay(alignment: .topLeading) {
             if isHovered {
                 Button(action: onClose) {
@@ -103,6 +89,26 @@ struct NotificationToastView: View {
     }
 
     @ViewBuilder
+    private var border: some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius)
+        if chrome.borderInside {
+            shape.strokeBorder(chrome.borderColor, lineWidth: chrome.borderWidth)
+        } else {
+            shape.stroke(chrome.borderColor, lineWidth: chrome.borderWidth)
+        }
+    }
+
+    // 画在卡片边界之外，对应系统横幅外侧那 1 px 暗线。
+    @ViewBuilder
+    private var outerLine: some View {
+        if let color = chrome.outerLineColor {
+            RoundedRectangle(cornerRadius: cornerRadius)
+                .inset(by: -0.25)
+                .stroke(color, lineWidth: 0.5)
+        }
+    }
+
+    @ViewBuilder
     private var iconView: some View {
         if let agent = toast.agent, let img = agent.iconImage() {
             Image(nsImage: img)
@@ -125,6 +131,44 @@ struct NotificationToastView: View {
             .frame(width: 38, height: 38)
             .frame(width: 40, height: 40)
             .offset(y: 1)
+        }
+    }
+}
+
+/// Material, border and shadow of the toast card for one color scheme.
+private struct ToastChrome {
+    let material: NSVisualEffectView.Material
+    /// 叠在材质上，用来压低材质对背景亮度的敏感度。
+    let tint: Color?
+    let borderColor: Color
+    let borderWidth: CGFloat
+    let borderInside: Bool
+    let outerLineColor: Color?
+    let shadowColor: Color
+    let shadowRadius: CGFloat
+    let shadowY: CGFloat
+
+    init(isDark: Bool) {
+        if isDark {
+            material = .headerView
+            tint = Color(white: 0.16).opacity(0.28)
+            borderColor = Color.white.opacity(0.15)
+            borderWidth = 1
+            borderInside = true
+            outerLineColor = Color.black.opacity(0.27)
+            shadowColor = .black.opacity(0.4)
+            shadowRadius = 5
+            shadowY = 1
+        } else {
+            material = .menu
+            tint = nil
+            borderColor = Color.primary.opacity(0.12)
+            borderWidth = 0.5
+            borderInside = false
+            outerLineColor = nil
+            shadowColor = .black.opacity(0.18)
+            shadowRadius = 8
+            shadowY = 3
         }
     }
 }
