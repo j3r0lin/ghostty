@@ -138,6 +138,11 @@ class TerminalWindow: NSWindow {
 
         let bar = CALayer()
         bar.backgroundColor = unreadAccentColor.cgColor
+        // On macOS 14 an unselected tab button holds a 45% black overlay view that AppKit
+        // re-adds on some tab bar changes (entering fullscreen, for one). A plain sublayer
+        // ends up above or below it depending on which was added last, so the same bar
+        // showed at full or half brightness from tab to tab.
+        bar.zPosition = 100
 
         // The resize mask has to pin the same edge the bar sits along.
         bar.frame = unreadBarFrame(in: tabButton)
