@@ -27,7 +27,7 @@ final class NotificationToastManager {
     /// Vertical gap between stacked toasts, in points.
     private let stackGap: CGFloat = 4
     /// Inset from the screen edges, in points.
-    private let edgeInset: CGFloat = 8
+    private let edgeInset: CGFloat = 16
 
     /// Look up a surface by its UUID (set by the integration layer).
     var surfaceLookup: ((UUID) -> Ghostty.SurfaceView?)?
@@ -156,7 +156,7 @@ final class NotificationToastManager {
     private func positionPanels() {
         guard let screen = NSScreen.main else { return }
         let frame = screen.visibleFrame
-        var topY = frame.maxY - 38
+        var topY = frame.maxY - 17
 
         for entry in entries {
             let panelW = entry.panel.frame.width

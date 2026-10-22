@@ -14,17 +14,17 @@ struct NotificationToastView: View {
     @State private var isHovered: Bool = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .center, spacing: 11.5) {
             iconView
 
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 0) {
                 Text(toast.title)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                 if !toast.subtitle.isEmpty {
                     Text(toast.subtitle)
-                        .font(.system(size: 13))
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -38,15 +38,17 @@ struct NotificationToastView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 10)
-        .frame(width: 370, alignment: .leading)
+        .padding(.leading, 6)
+        .padding(.trailing, 10)
+        .padding(.top, 10)
+        .padding(.bottom, 12)
+        .frame(width: 344, alignment: .leading)
         .background(
             NotificationVisualEffectBlur(material: .menu, blendingMode: .behindWindow)
-                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .clipShape(RoundedRectangle(cornerRadius: 20))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 14)
+            RoundedRectangle(cornerRadius: 20)
                 .stroke(Color.primary.opacity(0.12), lineWidth: 0.5)
         )
         .shadow(color: .black.opacity(0.18), radius: 8, x: 0, y: 3)
@@ -68,7 +70,7 @@ struct NotificationToastView: View {
             }
         }
         .padding(12) // reserve space so shadow isn't clipped by panel bounds
-        .contentShape(RoundedRectangle(cornerRadius: 14))
+        .contentShape(RoundedRectangle(cornerRadius: 20))
         .onTapGesture(perform: onClick)
         .onHover { hovering in
             isHovered = hovering
