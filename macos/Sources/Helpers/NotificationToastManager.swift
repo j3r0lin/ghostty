@@ -159,6 +159,28 @@ final class NotificationToastManager {
         guard let screen = NSScreen.main else { return }
         let frame = screen.visibleFrame
         var topY = frame.maxY - topInset
+        // A fullscreen window hides the menu bar, so visibleFrame's top edge is
+        // the screen edge and the toast would cover its tab bar. Panels only
+        // show on the active Space, so only that Space's fullscreen window
+        // matters. The key window in fullscreen is AppKit's separate toolbar
+        // window, not the terminal window, so search for the latter.
+        let fullscreenWindows = NSApp.windows
+            .compactMap { $0 as? TerminalWindow }
+            .filter {
+                $0.styleMask.contains(.fullScreen)
+                    && $0.isOnActiveSpace
+                    && $0.screen === screen
+            }
+        if let window = fullscreenWindows.first(where: { $0.isKeyWindow })
+            ?? fullscreenWindows.first {
+            let titlebarBottom = [window.tabBarView, window.titlebarContainer]
+                .compactMap { view -> CGFloat? in
+                    guard let view, !view.isHidden, let hostWindow = view.window else { return nil }
+                    return hostWindow.convertToScreen(view.convert(view.bounds, to: nil)).minY
+                }
+                .min() ?? window.convertToScreen(window.contentLayoutRect).maxY
+            topY = min(frame.maxY, titlebarBottom) - topInset
+        }
 
         for entry in entries {
             let panelW = entry.panel.frame.width
