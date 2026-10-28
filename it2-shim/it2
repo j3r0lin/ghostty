@@ -838,7 +838,7 @@ def cmd_session_set_name(args):
     body = f'''
 var t = {_target_expr(sid)};
 if (!t) return "NOTFOUND";
-sendEvent(0x47687374, 0x50664163, [[0x2d2d2d2d, $.NSAppleEventDescriptor.descriptorWithString("set_surface_title:{_escape_js(args.name)}")], [0x476f6e54, specifier(t)]]);
+sendEvent(0x636f7265, 0x73657464, [[0x2d2d2d2d, specifier(t.propertyWithCode(0x47546e6f))], [0x64617461, $.NSAppleEventDescriptor.descriptorWithString("{_escape_js(args.name)}")]]);
 return "ok";'''
     r = _run_and_check(body, sid)
     if r.stdout.strip() == "NOTFOUND":
