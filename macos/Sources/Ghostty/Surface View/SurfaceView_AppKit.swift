@@ -472,16 +472,16 @@ extension Ghostty {
                 detectedAgent = agent
 
                 if let result = result,
-                   let (execPath, argv) = CLIAgentDetector.processArgv(forPID: Int(result.matchedPID)) {
+                   let argv = CLIAgentDetector.processArgv(forPID: Int(result.matchedPID)) {
                     detectedAgentSession = CLIAgentSessionInfo(
-                        agent: result.agent, argv: argv, execPath: execPath, pid: result.matchedPID)
+                        agent: result.agent, argv: argv, pid: result.matchedPID)
                 } else {
                     detectedAgentSession = nil
                 }
             } else if let result = result, detectedAgentSession?.pid != result.matchedPID {
-                if let (execPath, argv) = CLIAgentDetector.processArgv(forPID: Int(result.matchedPID)) {
+                if let argv = CLIAgentDetector.processArgv(forPID: Int(result.matchedPID)) {
                     detectedAgentSession = CLIAgentSessionInfo(
-                        agent: result.agent, argv: argv, execPath: execPath, pid: result.matchedPID)
+                        agent: result.agent, argv: argv, pid: result.matchedPID)
                 }
             }
         }

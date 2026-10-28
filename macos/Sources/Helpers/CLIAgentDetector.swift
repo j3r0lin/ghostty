@@ -232,12 +232,11 @@ enum CLIAgent: String, CaseIterable, Equatable {
 struct CLIAgentSessionInfo: Equatable {
     let agent: CLIAgent
     let argv: [String]
-    let execPath: String
     let pid: pid_t
 }
 
 enum CLIAgentDetector {
-    static func processArgv(forPID pid: Int) -> (execPath: String, argv: [String])? {
+    static func processArgv(forPID pid: Int) -> [String]? {
         var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, Int32(pid)]
         var size: Int = 0
         guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > MemoryLayout<Int32>.size else { return nil }
@@ -264,9 +263,7 @@ enum CLIAgentDetector {
         }
 
         var offset = MemoryLayout<Int32>.size
-        let execEnd = endOfCString(from: offset)
-        let execPath = String(cString: buffer.advanced(by: offset).assumingMemoryBound(to: CChar.self))
-        offset = execEnd + 1  // skip the NUL
+        offset = endOfCString(from: offset) + 1  // skip exec_path and its NUL
 
         // Skip alignment padding between exec_path and argv[0].
         while offset < size && buffer.load(fromByteOffset: offset, as: UInt8.self) == 0 {
@@ -284,11 +281,7 @@ enum CLIAgentDetector {
         }
 
         guard !argv.isEmpty else { return nil }
-        return (execPath, argv)
-    }
-
-    static func detect(fromPID pid: Int) -> CLIAgent? {
-        detectWithPID(fromPID: pid)?.agent
+        return argv
     }
 
     static func detectWithPID(fromPID pid: Int) -> (agent: CLIAgent, matchedPID: pid_t)? {

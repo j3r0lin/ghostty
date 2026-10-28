@@ -1329,7 +1329,6 @@ class BaseTerminalController: NSWindowController,
                 if tw.tabHasUnread {
                     tw.reattachTabUnreadTintIfNeeded()
                 }
-                tw.updateTabUnreadVisibility()
                 tw.reattachTabSeparatorIfNeeded()
             }
         }
@@ -1345,7 +1344,6 @@ class BaseTerminalController: NSWindowController,
                 if tw.showTabProgress {
                     tw.updateTabProgressVisibility()
                 }
-                tw.updateTabUnreadVisibility()
             }
         }
     }

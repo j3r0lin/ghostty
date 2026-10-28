@@ -94,10 +94,6 @@ class TerminalWindow: NSWindow {
         progressGlowLayer?.isHidden = isKeyWindow
     }
 
-    func updateTabUnreadVisibility() {
-        unreadBarLayer?.isHidden = false
-    }
-
     /// The detected CLI agent for this window's tab icon.
     var tabAgent: CLIAgent? {
         didSet {
