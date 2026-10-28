@@ -187,6 +187,14 @@ tell application "Ghostty"
 end tell
 ```
 
+`set_surface_title` works like a program setting the title, so the next OSC title from the shell or program replaces it. For a name that stays, set the `name override` property instead (an empty string clears it); `it2 session set-name` does this:
+
+```applescript
+tell application "Ghostty"
+    set name override of focused terminal of selected tab of front window to "Build Server"
+end tell
+```
+
 ### Terminal Control
 
 | Action | Description |
