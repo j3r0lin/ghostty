@@ -143,7 +143,7 @@ fn loadPaths(self: *Config) !String {
         try joined.appendSlice(alloc, path);
     }
 
-    const owned = try global.alloc().dupeZ(u8, joined.items);
+    const owned = try global.alloc().dupeSentinel(u8, joined.items, 0);
     return .fromSlice(owned);
 }
 
@@ -261,7 +261,7 @@ fn writeConfig(dir: *std.Io.Dir, name: []const u8, data: []const u8) ![:0]const 
     try dir.writeFile(global.io(), .{ .sub_path = name, .data = data });
     var buf: [std.fs.max_path_bytes]u8 = undefined;
     const len = try dir.realPathFile(global.io(), name, &buf);
-    return try alloc.dupeZ(u8, buf[0..len]);
+    return try alloc.dupeSentinel(u8, buf[0..len], 0);
 }
 
 fn listedPaths(cfg: *Config) ![]const u8 {

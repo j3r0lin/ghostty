@@ -4817,7 +4817,7 @@ fn noteLoadPath(self: *Config, path: []const u8) Allocator.Error!void {
         if (std.mem.eql(u8, recorded, path)) return;
     }
     const alloc = self._arena.?.allocator();
-    try self._load_paths.append(alloc, try alloc.dupeZ(u8, path));
+    try self._load_paths.append(alloc, try alloc.dupeSentinel(u8, path, 0));
 }
 
 /// Call this once after you are done setting configuration. This
@@ -5311,7 +5311,7 @@ pub fn clone(
     result._theme_location = try self._theme_location.clone(alloc_arena);
     try result._load_paths.ensureTotalCapacity(alloc_arena, self._load_paths.items.len);
     for (self._load_paths.items) |path| {
-        result._load_paths.appendAssumeCapacity(try alloc_arena.dupeZ(u8, path));
+        result._load_paths.appendAssumeCapacity(try alloc_arena.dupeSentinel(u8, path, 0));
     }
 
     // Preserve our replay steps. We copy them exactly to also preserve
