@@ -41,7 +41,7 @@ pub const Location = enum {
                     // We need to do some comptime tricks to get the right
                     // error set since some platforms don't support some
                     // error types.
-                    const Error = @TypeOf(err) || switch (builtin.os.tag) {
+                    const Error = @TypeOf(err) || switch (builtin.target.os.tag) {
                         .ios => error{BufferTooSmall},
                         else => error{},
                     };
@@ -79,9 +79,9 @@ pub const LocationIterator = struct {
         location: Location,
         dir: []const u8,
     } {
-        const max = @typeInfo(Location).@"enum".fields.len;
+        const max = @typeInfo(Location).@"enum".field_names.len;
         while (self.i < max) {
-            const location: Location = @enumFromInt(self.i);
+            const location: Location = @fromBackingInt(@intCast(self.i));
             self.i += 1;
             if (try location.dir(self.arena_alloc)) |dir|
                 return .{
@@ -131,8 +131,7 @@ pub fn open(
         const stat = file.stat(global.io()) catch |err| {
             try diags.append(arena_alloc, .{
                 .location = location,
-                .message = try std.fmt.allocPrintSentinel(
-                    arena_alloc,
+                .message = try arena_alloc.printSentinel(
                     "not reading theme from \"{s}\": {}",
                     .{ theme, err },
                     0,
@@ -145,8 +144,7 @@ pub fn open(
             else => {
                 try diags.append(arena_alloc, .{
                     .location = location,
-                    .message = try std.fmt.allocPrintSentinel(
-                        arena_alloc,
+                    .message = try arena_alloc.printSentinel(
                         "not reading theme from \"{s}\": it is a {s}",
                         .{ theme, @tagName(stat.kind) },
                         0,
@@ -162,8 +160,7 @@ pub fn open(
     if (!std.mem.eql(u8, theme, basename)) {
         try diags.append(arena_alloc, .{
             .location = location,
-            .message = try std.fmt.allocPrintSentinel(
-                arena_alloc,
+            .message = try arena_alloc.printSentinel(
                 "theme \"{s}\" cannot include path separators unless it is an absolute path",
                 .{theme},
                 0,
@@ -182,8 +179,7 @@ pub fn open(
             const stat = file.stat(global.io()) catch |err| {
                 try diags.append(arena_alloc, .{
                     .location = location,
-                    .message = try std.fmt.allocPrintSentinel(
-                        arena_alloc,
+                    .message = try arena_alloc.printSentinel(
                         "not reading theme from \"{s}\": {}",
                         .{ theme, err },
                         0,
@@ -196,8 +192,7 @@ pub fn open(
                 else => {
                     try diags.append(arena_alloc, .{
                         .location = location,
-                        .message = try std.fmt.allocPrintSentinel(
-                            arena_alloc,
+                        .message = try arena_alloc.printSentinel(
                             "not reading theme from \"{s}\": it is a {s}",
                             .{ theme, @tagName(stat.kind) },
                             0,
@@ -218,8 +213,7 @@ pub fn open(
             else => {
                 try diags.append(arena_alloc, .{
                     .location = location,
-                    .message = try std.fmt.allocPrintSentinel(
-                        arena_alloc,
+                    .message = try arena_alloc.printSentinel(
                         "failed to load theme \"{s}\" from the file \"{s}\": {}",
                         .{ theme, path, err },
                         0,
@@ -240,8 +234,7 @@ pub fn open(
         const path = try std.fs.path.join(arena_alloc, &.{ loc.dir, theme });
         try diags.append(arena_alloc, .{
             .location = location,
-            .message = try std.fmt.allocPrintSentinel(
-                arena_alloc,
+            .message = try arena_alloc.printSentinel(
                 "theme \"{s}\" not found, tried path \"{s}\"",
                 .{ theme, path },
                 0,
@@ -270,8 +263,7 @@ pub fn openAbsolute(
         switch (err) {
             error.FileNotFound => try diags.append(arena_alloc, .{
                 .location = location,
-                .message = try std.fmt.allocPrintSentinel(
-                    arena_alloc,
+                .message = try arena_alloc.printSentinel(
                     "failed to load theme from the path \"{s}\"",
                     .{theme},
                     0,
@@ -279,8 +271,7 @@ pub fn openAbsolute(
             }),
             else => try diags.append(arena_alloc, .{
                 .location = location,
-                .message = try std.fmt.allocPrintSentinel(
-                    arena_alloc,
+                .message = try arena_alloc.printSentinel(
                     "failed to load theme from the path \"{s}\": {}",
                     .{ theme, err },
                     0,

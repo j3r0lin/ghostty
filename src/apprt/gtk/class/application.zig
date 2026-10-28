@@ -195,6 +195,11 @@ pub const Application = extern struct {
         /// only be set by the main loop thread.
         running: bool = false,
 
+        /// True once we've told systemd that startup is complete. Reloads
+        /// before then (e.g. syncing the color scheme during startup) must
+        /// not notify systemd, or it sees READY=1 before we're ready.
+        systemd_ready: bool = false,
+
         /// The timer used to quit the application after the last window is
         /// closed. Even if there is no quit delay set, this is the state
         /// used to determine to close the app.
@@ -256,7 +261,7 @@ pub const Application = extern struct {
     pub fn new(
         rt_app: *ApprtApp,
         core_app: *CoreApp,
-    ) Allocator.Error!*Self {
+    ) (error{ GtkMinimumVersion, AdwaitaMinimumVersion } || Allocator.Error)!*Self {
         const alloc = core_app.alloc;
 
         // Capture GLib/GObject/GTK log messages and funnel them through Zig's
@@ -264,8 +269,8 @@ pub const Application = extern struct {
         _ = glib.logSetWriterFunc(glibLogWriterFunction, null, null);
 
         // Log our GTK versions
-        gtk_version.logVersion();
-        adw_version.logVersion();
+        try gtk_version.logVersion();
+        try adw_version.logVersion();
 
         // Load our configuration.
         var config = CoreConfig.load(alloc) catch |err| err: {
@@ -556,6 +561,7 @@ pub const Application = extern struct {
 
         // Tell systemd that we are ready.
         systemd.notify.ready();
+        priv.systemd_ready = true;
 
         log.debug("entering runloop", .{});
         defer log.debug("exiting runloop", .{});
@@ -762,6 +768,8 @@ pub const Application = extern struct {
 
             .resize_split => return Action.resizeSplit(target, value),
 
+            .resize_window => return Action.resizeWindow(target, value),
+
             .ring_bell => Action.ringBell(target),
 
             // GTK has no accessibility consumer for this yet.
@@ -778,6 +786,8 @@ pub const Application = extern struct {
             .show_gtk_inspector => Action.showGtkInspector(),
 
             .size_limit => return Action.sizeLimit(target, value),
+
+            .cell_size => return Action.cellSize(target, value),
 
             .toggle_maximize => Action.toggleMaximize(target),
             .toggle_fullscreen => Action.toggleFullscreen(target),
@@ -801,7 +811,6 @@ pub const Application = extern struct {
             .float_window,
             .toggle_visibility,
             .toggle_background_opacity,
-            .cell_size,
             .render_inspector,
             .renderer_health,
             .color_change,
@@ -895,102 +904,6 @@ pub const Application = extern struct {
         defer buf.deinit();
 
         const writer = &buf.writer;
-
-        // Load standard css first as it can override some of the user configured styling.
-        try loadRuntimeCss414(config, writer);
-        try loadRuntimeCss416(config, writer);
-
-        const unfocused_fill: CoreConfig.Color = config.@"unfocused-split-fill" orelse config.background;
-
-        try writer.print(
-            \\widget.unfocused-split {{
-            \\ opacity: {d:.2};
-            \\ background-color: rgb({d},{d},{d});
-            \\}}
-            \\
-        , .{
-            1.0 - config.@"unfocused-split-opacity",
-            unfocused_fill.r,
-            unfocused_fill.g,
-            unfocused_fill.b,
-        });
-
-        if (config.@"split-divider-color") |color| {
-            try writer.print(
-                \\.window .split paned > separator {{
-                \\  color: rgb({[r]d},{[g]d},{[b]d});
-                \\  background: rgb({[r]d},{[g]d},{[b]d});
-                \\}}
-                \\
-            , .{
-                .r = color.r,
-                .g = color.g,
-                .b = color.b,
-            });
-        }
-
-        if (config.@"window-title-font-family") |font_family| {
-            try writer.print(
-                \\.window headerbar {{
-                \\  font-family: "{[font_family]s}";
-                \\}}
-                \\
-            , .{ .font_family = font_family });
-        }
-
-        const contents = buf.written();
-
-        log.debug("runtime CSS is {d} bytes", .{contents.len});
-
-        const bytes = glib.Bytes.new(contents.ptr, contents.len);
-        defer bytes.unref();
-
-        // Clears any previously loaded CSS from this provider
-        priv.css_provider.loadFromBytes(bytes);
-    }
-
-    /// Load runtime CSS for older than GTK 4.16
-    fn loadRuntimeCss414(
-        config: *const CoreConfig,
-        writer: *std.Io.Writer,
-    ) std.Io.Writer.Error!void {
-        if (gtk_version.runtimeAtLeast(4, 16, 0)) return;
-
-        const window_theme = config.@"window-theme";
-        const headerbar_background = config.@"window-titlebar-background" orelse config.background;
-        const headerbar_foreground = config.@"window-titlebar-foreground" orelse config.foreground;
-
-        switch (window_theme) {
-            .ghostty => try writer.print(
-                \\windowhandle {{
-                \\  background-color: rgb({d},{d},{d});
-                \\  color: rgb({d},{d},{d});
-                \\}}
-                \\windowhandle:backdrop {{
-                \\ background-color: oklab(from rgb({d},{d},{d}) calc(l * 0.9) a b / alpha);
-                \\}}
-                \\
-            , .{
-                headerbar_background.r,
-                headerbar_background.g,
-                headerbar_background.b,
-                headerbar_foreground.r,
-                headerbar_foreground.g,
-                headerbar_foreground.b,
-                headerbar_background.r,
-                headerbar_background.g,
-                headerbar_background.b,
-            }),
-            else => {},
-        }
-    }
-
-    /// Load runtime for GTK 4.16 and newer
-    fn loadRuntimeCss416(
-        config: *const CoreConfig,
-        writer: *std.Io.Writer,
-    ) std.Io.Writer.Error!void {
-        if (gtk_version.runtimeUntil(4, 16, 0)) return;
 
         const window_theme = config.@"window-theme";
         const headerbar_background = config.@"window-titlebar-background" orelse config.background;
@@ -1098,6 +1011,10 @@ pub const Application = extern struct {
                 \\  --window-fg-color: var(--ghostty-fg);
                 \\  --window-bg-color: var(--ghostty-bg);
                 \\}}
+                \\listview.command-palette-view {{
+                \\  --view-fg-color: var(--ghostty-fg);
+                \\  --view-bg-color: var(--ghostty-bg);
+                \\}}
                 \\windowhandle {{
                 \\  background-color: var(--headerbar-bg-color);
                 \\  color: var(--headerbar-fg-color);
@@ -1115,6 +1032,54 @@ pub const Application = extern struct {
             }),
             else => {},
         }
+
+        const unfocused_fill: CoreConfig.Color = config.@"unfocused-split-fill" orelse config.background;
+
+        try writer.print(
+            \\widget.unfocused-split {{
+            \\ opacity: {d:.2};
+            \\ background-color: rgb({d},{d},{d});
+            \\}}
+            \\
+        , .{
+            1.0 - config.@"unfocused-split-opacity",
+            unfocused_fill.r,
+            unfocused_fill.g,
+            unfocused_fill.b,
+        });
+
+        if (config.@"split-divider-color") |color| {
+            try writer.print(
+                \\.window .split paned > separator {{
+                \\  color: rgb({[r]d},{[g]d},{[b]d});
+                \\  background: rgb({[r]d},{[g]d},{[b]d});
+                \\}}
+                \\
+            , .{
+                .r = color.r,
+                .g = color.g,
+                .b = color.b,
+            });
+        }
+
+        if (config.@"window-title-font-family") |font_family| {
+            try writer.print(
+                \\.window headerbar {{
+                \\  font-family: "{[font_family]s}";
+                \\}}
+                \\
+            , .{ .font_family = font_family });
+        }
+
+        const contents = buf.written();
+
+        log.debug("runtime CSS is {d} bytes", .{contents.len});
+
+        const bytes = glib.Bytes.new(contents.ptr, contents.len);
+        defer bytes.unref();
+
+        // Clears any previously loaded CSS from this provider
+        priv.css_provider.loadFromBytes(bytes);
     }
 
     const LoadCustomCssError = std.Io.File.OpenError ||
@@ -1324,7 +1289,7 @@ pub const Application = extern struct {
     ) callconv(.c) void {
         const location = css_section.toString();
         defer glib.free(location);
-        if (comptime gtk_version.atLeast(4, 16, 0)) bytes: {
+        bytes: {
             const bytes = css_section.getBytes() orelse break :bytes;
             var len: usize = undefined;
             const ptr = bytes.getData(&len) orelse break :bytes;
@@ -1376,11 +1341,13 @@ pub const Application = extern struct {
         // Setup our event loop
         self.startupXev();
 
+        // Setup some signal handlers. This must happen before anything
+        // that might notify systemd, since with Type=notify-reload systemd
+        // refuses to start us if our reload signal has no handler.
+        self.startupSignals();
+
         // Setup our style manager (light/dark mode)
         self.startupStyleManager();
-
-        // Setup some signal handlers
-        self.startupSignals();
 
         // Setup our action map
         self.startupActionMap();
@@ -1467,7 +1434,7 @@ pub const Application = extern struct {
         const priv = self.private();
         assert(priv.signal_source == null);
         priv.signal_source = glibunix.signalAdd(
-            @intFromEnum(std.posix.SIG.USR2),
+            @backingInt(std.posix.SIG.USR2),
             handleSigusr2,
             self,
         );
@@ -1772,10 +1739,11 @@ pub const Application = extern struct {
         };
 
         var body_buf: [512]u8 = undefined;
-        const body = std.fmt.bufPrintZ(
+        const body = std.mem.printSentinel(
             &body_buf,
             "{s}: {s}",
             .{ label, detail },
+            0,
         ) catch return;
 
         Action.desktopNotification(self, .app, .{
@@ -2214,7 +2182,7 @@ const Action = struct {
         ) callconv(.c) void {
             defer dialog.unref();
 
-            if (response_id != @intFromEnum(gtk.ResponseType.accept)) return;
+            if (response_id != @backingInt(gtk.ResponseType.accept)) return;
 
             const file = dialog.as(gtk.FileChooser).getFile() orelse {
                 log.warn("inspector export dialog returned no file", .{});
@@ -2369,7 +2337,7 @@ const Action = struct {
                     .previous => .previous,
                     .next => .next,
                     .last => .last,
-                    else => .{ .n = @intCast(@intFromEnum(tab)) },
+                    else => .{ .n = @intCast(@backingInt(tab)) },
                 });
             },
         }
@@ -2679,8 +2647,7 @@ const Action = struct {
                     .direct = &.{ "/bin/sh", "-c", cmd },
                 };
 
-                const title = std.fmt.allocPrintSentinel(
-                    alloc,
+                const title = alloc.printSentinel(
                     "{s} {s}",
                     .{ i18n._("Editing configuration file"), path },
                     0,
@@ -2823,11 +2790,13 @@ const Action = struct {
         target: apprt.Target,
         opts: apprt.action.ReloadConfig,
     ) !void {
-        // Tell systemd that reloading has started.
-        systemd.notify.reloading();
+        // Tell systemd that reloading has started, but only once startup
+        // is complete. A reload during startup is not a reload to systemd.
+        const notify_systemd = self.private().systemd_ready;
+        if (notify_systemd) systemd.notify.reloading();
 
         // When we exit this function tell systemd that reloading has finished.
-        defer systemd.notify.ready();
+        defer if (notify_systemd) systemd.notify.ready();
 
         // Get our config object.
         const config: *Config = config: {
@@ -2901,6 +2870,30 @@ const Action = struct {
                         return false;
                     },
                 };
+            },
+        }
+    }
+
+    pub fn resizeWindow(
+        target: apprt.Target,
+        value: apprt.action.ResizeWindow,
+    ) bool {
+        switch (target) {
+            .app => {
+                log.warn("resize_window to app is unexpected", .{});
+                return false;
+            },
+            .surface => |core| {
+                const surface = core.rt_surface.surface;
+                const window = ext.getAncestor(
+                    Window,
+                    surface.as(gtk.Widget),
+                ) orelse {
+                    log.warn("surface is not in a window, ignoring resize_window", .{});
+                    return false;
+                };
+
+                return window.resizeSurface(surface, value);
             },
         }
     }
@@ -3037,6 +3030,19 @@ const Action = struct {
                     .height = value.min_height,
                 });
 
+                return true;
+            },
+        }
+    }
+
+    pub fn cellSize(
+        target: apprt.Target,
+        value: apprt.action.CellSize,
+    ) bool {
+        switch (target) {
+            .app => return false,
+            .surface => |core| {
+                core.rt_surface.surface.setCellSize(value.width, value.height);
                 return true;
             },
         }
@@ -3273,10 +3279,10 @@ fn setGtkEnv(config: *const CoreConfig) std.Io.Writer.Error!void {
         var buf: [1024]u8 = undefined;
         var writer: std.Io.Writer = .fixed(&buf);
         var first: bool = true;
-        inline for (@typeInfo(@TypeOf(gdk_debug)).@"struct".fields) |field| {
-            if (@field(gdk_debug, field.name)) {
+        inline for (@typeInfo(@TypeOf(gdk_debug)).@"struct".field_names) |field| {
+            if (@field(gdk_debug, field)) {
                 if (!first) try writer.writeAll(",");
-                try writer.writeAll(field.name);
+                try writer.writeAll(field);
                 first = false;
             }
         }
@@ -3290,10 +3296,10 @@ fn setGtkEnv(config: *const CoreConfig) std.Io.Writer.Error!void {
         var buf: [1024]u8 = undefined;
         var writer: std.Io.Writer = .fixed(&buf);
         var first: bool = true;
-        inline for (@typeInfo(@TypeOf(gdk_disable)).@"struct".fields) |field| {
-            if (@field(gdk_disable, field.name)) {
+        inline for (@typeInfo(@TypeOf(gdk_disable)).@"struct".field_names) |field| {
+            if (@field(gdk_disable, field)) {
                 if (!first) try writer.writeAll(",");
-                try writer.writeAll(field.name);
+                try writer.writeAll(field);
                 first = false;
             }
         }
