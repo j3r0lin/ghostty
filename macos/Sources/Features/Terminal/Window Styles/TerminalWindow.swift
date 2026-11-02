@@ -86,12 +86,11 @@ class TerminalWindow: NSWindow {
 
     private var brailleSpinnerView: BrailleSpinnerView?
     private var brailleSpinnerHoverView: AgentIconHoverView?
-    private var progressGlowLayer: CALayer?
 
+    /// Callers use this after a key or progress change; the tab backdrop is what
+    /// depends on both, so it is the thing to bring up to date.
     func updateTabProgressVisibility() {
-        // Only the glow background is suppressed on the active tab; the spinner
-        // is kept so the active tab still shows it's busy.
-        progressGlowLayer?.isHidden = isKeyWindow
+        applyActiveTabStyle()
     }
 
     /// The detected CLI agent for this window's tab icon.
@@ -122,7 +121,7 @@ class TerminalWindow: NSWindow {
 
     /// A plain sublayer rather than a subview: a view pinned with constraints makes
     /// every blink a reason for the titlebar to re-run Auto Layout. This follows the
-    /// same pattern as tabActiveIndicatorLayer and progressGlowLayer.
+    /// same pattern as tabBackdropLayer.
     private var unreadBarLayer: CALayer?
 
     private static let unreadBarHeight: CGFloat = 2
@@ -189,24 +188,124 @@ class TerminalWindow: NSWindow {
         }
     }
 
-    private var tabActiveIndicatorLayer: CALayer?
-
-    func attachTabActiveIndicator() {
-        guard !isAttachedToOwnTab(tabActiveIndicatorLayer) else { return }
-        removeTabActiveIndicator()
-        guard let tabButton = findOwnTabButton() else { return }
-        let layer = CALayer()
-        layer.backgroundColor = NSColor.white.withAlphaComponent(0.08).cgColor
-        layer.frame = CGRect(origin: .zero, size: tabButton.bounds.size)
-        layer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
-        tabButton.wantsLayer = true
-        tabButton.layer?.addSublayer(layer)
-        tabActiveIndicatorLayer = layer
+    /// The tab the user has selected in its tab group. The key window is not
+    /// enough: with the app in the background there is no key window, yet one tab
+    /// must still read as the current one.
+    private var isActiveTab: Bool {
+        guard let tabGroup else { return true }
+        return tabGroup.selectedWindow === self
     }
 
-    func removeTabActiveIndicator() {
-        tabActiveIndicatorLayer?.removeFromSuperlayer()
-        tabActiveIndicatorLayer = nil
+    /// Bring every tab in this group in line with the current selection. Selecting
+    /// a tab also changes how its neighbours look, so all of them are walked
+    /// rather than leaving stale decoration behind.
+    func refreshActiveTabDecorations() {
+        for w in tabbedWindows ?? [self] {
+            (w as? TerminalWindow)?.applyActiveTabStyle()
+        }
+    }
+
+    private func applyActiveTabStyle() {
+        reattachTabBackdropIfNeeded()
+        tab.attributedTitle = attributedTitle
+    }
+
+    /// A programmatic tab switch changes selectedWindow without touching the key
+    /// window, so the tab group's selection is observed directly.
+    private weak var observedTabGroup: NSWindowTabGroup?
+    private var selectedTabObservation: NSKeyValueObservation?
+
+    private func observeSelectedTab() {
+        // Same reason as TransparentTitlebarTerminalWindow: rebinding an
+        // observation from inside its own callback retains the window.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let currentTabGroup = self.tabGroup
+            guard self.observedTabGroup !== currentTabGroup || self.selectedTabObservation == nil else { return }
+
+            self.observedTabGroup = currentTabGroup
+            self.selectedTabObservation?.invalidate()
+            self.selectedTabObservation = currentTabGroup?.observe(\.selectedWindow, options: [.new]) { [weak self] _, _ in
+                self?.refreshActiveTabDecorations()
+            }
+        }
+    }
+
+    /// The active tab is filled with the terminal's own background so it reads as
+    /// part of the terminal below; the others are darkened and closed off by a
+    /// black line along their bottom edge.
+    private var tabBackdropLayer: CALayer?
+    private var tabBottomLineLayer: CALayer?
+
+    private static let inactiveTabDim: CGFloat = 0.5
+
+    /// Dimmed text for inactive tabs. Dynamic, so it follows the tab button's
+    /// appearance rather than the system's.
+    private static let inactiveTabTitleColor = NSColor.labelColor.withAlphaComponent(0.4)
+
+    private func reattachTabBackdropIfNeeded() {
+        guard let tabButton = findOwnTabButton() else { return }
+        tabButton.wantsLayer = true
+        guard let parent = tabButton.layer else { return }
+
+        if !isAttachedToOwnTab(tabBackdropLayer) {
+            removeTabBackdrop()
+            let layer = CALayer()
+            layer.frame = tabButton.bounds
+            layer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+            // Below the title and icon: an added-last sublayer would cover them.
+            parent.insertSublayer(layer, at: 0)
+            tabBackdropLayer = layer
+        }
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+        tabBackdropLayer?.frame = tabButton.bounds
+
+        if isActiveTab {
+            let color = (preferredBackgroundColor ?? .black).withAlphaComponent(1)
+            tabBackdropLayer?.backgroundColor = color.cgColor
+            removeTabBottomLine()
+        } else {
+            tabBackdropLayer?.backgroundColor = NSColor.black.withAlphaComponent(Self.inactiveTabDim).cgColor
+            attachTabBottomLine(to: tabButton, parent: parent)
+        }
+    }
+
+    private func attachTabBottomLine(to tabButton: NSView, parent: CALayer) {
+        if !isAttachedToOwnTab(tabBottomLineLayer) {
+            removeTabBottomLine()
+            let line = CALayer()
+            line.backgroundColor = NSColor.black.cgColor
+            // Same reason as the unread bar: sit above the 45% black overlay AppKit
+            // re-adds to unselected tab buttons on macOS 14.
+            line.zPosition = 100
+            parent.addSublayer(line)
+            tabBottomLineLayer = line
+        }
+        guard let line = tabBottomLineLayer else { return }
+        let height: CGFloat = 1
+        let bounds = tabButton.bounds
+        // Flipped views measure y from the top.
+        if tabButton.isFlipped {
+            line.frame = CGRect(x: 0, y: bounds.height - height, width: bounds.width, height: height)
+            line.autoresizingMask = [.layerWidthSizable, .layerMinYMargin]
+        } else {
+            line.frame = CGRect(x: 0, y: 0, width: bounds.width, height: height)
+            line.autoresizingMask = [.layerWidthSizable, .layerMaxYMargin]
+        }
+    }
+
+    private func removeTabBottomLine() {
+        tabBottomLineLayer?.removeFromSuperlayer()
+        tabBottomLineLayer = nil
+    }
+
+    private func removeTabBackdrop() {
+        tabBackdropLayer?.removeFromSuperlayer()
+        tabBackdropLayer = nil
+        removeTabBottomLine()
     }
 
     private var tabSeparatorLayer: CALayer?
@@ -266,17 +365,12 @@ class TerminalWindow: NSWindow {
     /// after it moves our accessory view into a rebuilt or brand-new tab button.
     func reattachTabDecorationsIfNeeded() {
         guard findOwnTabButton() != nil else { return }
-        // The active indicator belongs to the key window only; see becomeKey.
-        if isKeyWindow {
-            attachTabActiveIndicator()
-        } else {
-            removeTabActiveIndicator()
-        }
+        reattachTabBackdropIfNeeded()
         reattachTabSeparatorIfNeeded()
         reattachTabUnreadTintIfNeeded()
         reattachTabAgentIconIfNeeded()
         reattachTabProgressIfNeeded()
-        updateTabProgressVisibility()
+        refreshActiveTabDecorations()
     }
 
     /// Our accessory view is the only thing we control that AppKit moves into whatever
@@ -348,53 +442,21 @@ class TerminalWindow: NSWindow {
 
     private func updateTabProgress() {
         if showTabProgress {
-            attachProgressGlow()
             attachBrailleSpinner()
-            updateTabProgressVisibility()
         } else {
             removeBrailleSpinner()
-            removeProgressGlow()
         }
     }
 
     func reattachTabProgressIfNeeded() {
         guard showTabProgress, findOwnTabButton() != nil else { return }
-        var needsReattach = false
-        if !isAttachedToOwnTab(progressGlowLayer) {
-            removeProgressGlow()
-            attachProgressGlow()
-            needsReattach = true
-        }
-
         // The spinner goes into whichever hover view is in use: the icon's when
         // there is an agent, its own otherwise.
         let spinnerHost: NSView? = tabAgentIconView != nil ? tabAgentHoverView : brailleSpinnerHoverView
         if !isAttachedToOwnTab(spinnerHost) || !isAttachedToOwnTab(brailleSpinnerView) {
             removeBrailleSpinner()
             attachBrailleSpinner()
-            needsReattach = true
         }
-        if needsReattach { updateTabProgressVisibility() }
-    }
-
-    private func attachProgressGlow() {
-        guard progressGlowLayer == nil, let tabButton = findOwnTabButton() else { return }
-        tabButton.wantsLayer = true
-        guard let parent = tabButton.layer else { return }
-
-        let color: NSColor = .controlAccentColor
-        let layer = CALayer()
-        layer.backgroundColor = color.withAlphaComponent(0.15).cgColor
-        layer.frame = tabButton.bounds
-        layer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
-        parent.addSublayer(layer)
-
-        progressGlowLayer = layer
-    }
-
-    private func removeProgressGlow() {
-        progressGlowLayer?.removeFromSuperlayer()
-        progressGlowLayer = nil
     }
 
     // MARK: Braille Gradient Spinner
@@ -619,20 +681,16 @@ class TerminalWindow: NSWindow {
     override func becomeKey() {
         super.becomeKey()
         resetZoomTabButton.contentTintColor = .controlAccentColor
-        attachTabActiveIndicator()
-        // Defensive: tab bar rebuilds (e.g. drag reorder) can leave stale layers.
-        for w in tabbedWindows ?? [] where w !== self {
-            guard let tw = w as? TerminalWindow,
-                  tw.tabActiveIndicatorLayer != nil else { continue }
-            tw.removeTabActiveIndicator()
-        }
+        observeSelectedTab()
+        refreshActiveTabDecorations()
     }
 
     override func resignKey() {
         super.resignKey()
         resetZoomTabButton.contentTintColor = .secondaryLabelColor
         tabTitleEditor.finishEditing(commit: true)
-        removeTabActiveIndicator()
+        // The selection, not the key window, decides what stays lit.
+        refreshActiveTabDecorations()
     }
 
     override func becomeMain() {
@@ -646,11 +704,16 @@ class TerminalWindow: NSWindow {
             tabBarDidDisappear()
         }
         viewModel.isMainWindow = true
+        observeSelectedTab()
+        refreshActiveTabDecorations()
     }
 
     override func resignMain() {
         super.resignMain()
         viewModel.isMainWindow = false
+        // Fallback for a selection change the KVO never saw: the tab group can
+        // be swapped out from under the observation.
+        refreshActiveTabDecorations()
     }
 
     @discardableResult
@@ -766,7 +829,7 @@ class TerminalWindow: NSWindow {
                 string: "\(keyEquivalent) ",
                 attributes: [
                     .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
-                    .foregroundColor: isKeyWindow ? NSColor.labelColor : NSColor.secondaryLabelColor,
+                    .foregroundColor: isActiveTab ? NSColor.labelColor : Self.inactiveTabTitleColor,
                 ])
         }
     }
@@ -859,7 +922,7 @@ class TerminalWindow: NSWindow {
 
         let attributes: [NSAttributedString.Key: Any] = [
             .font: titlebarFont,
-            .foregroundColor: isKeyWindow ? NSColor.labelColor : NSColor.secondaryLabelColor,
+            .foregroundColor: isActiveTab ? NSColor.labelColor : Self.inactiveTabTitleColor,
         ]
         return NSAttributedString(string: title, attributes: attributes)
     }
@@ -994,7 +1057,11 @@ class TerminalWindow: NSWindow {
         // have no effect if the window is not visible. Ultimately, we'll have this called
         // at some point when a surface becomes focused.
         guard isVisible else { return }
-        defer { updateColorSchemeForSurfaceTree() }
+        defer {
+            updateColorSchemeForSurfaceTree()
+            // The active tab is filled with this same background.
+            refreshActiveTabDecorations()
+        }
 
         // Basic properties
         appearance = surfaceConfig.windowAppearance
@@ -1108,6 +1175,7 @@ class TerminalWindow: NSWindow {
         if let observer = occlusionObserver {
             NotificationCenter.default.removeObserver(observer)
         }
+        selectedTabObservation?.invalidate()
     }
 
     // MARK: Config
