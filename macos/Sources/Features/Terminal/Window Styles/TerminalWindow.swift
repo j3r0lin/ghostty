@@ -191,11 +191,6 @@ class TerminalWindow: NSWindow {
 
     private var tabActiveIndicatorLayer: CALayer?
 
-    /// Added and removed together with `tabActiveIndicatorLayer`.
-    private var activeUnderlineLayer: CALayer?
-
-    private static let activeUnderlineHeight: CGFloat = 3
-
     func attachTabActiveIndicator() {
         guard !isAttachedToOwnTab(tabActiveIndicatorLayer) else { return }
         removeTabActiveIndicator()
@@ -207,46 +202,11 @@ class TerminalWindow: NSWindow {
         tabButton.wantsLayer = true
         tabButton.layer?.addSublayer(layer)
         tabActiveIndicatorLayer = layer
-
-        attachActiveUnderline(to: tabButton)
     }
 
     func removeTabActiveIndicator() {
         tabActiveIndicatorLayer?.removeFromSuperlayer()
         tabActiveIndicatorLayer = nil
-        activeUnderlineLayer?.removeFromSuperlayer()
-        activeUnderlineLayer = nil
-    }
-
-    /// The active tab is otherwise only a white 8% fill, which reads as the same
-    /// gray as its neighbours; the bar gives the selection an edge the eye lands on.
-    private func attachActiveUnderline(to tabButton: NSView) {
-        guard let parent = tabButton.layer else { return }
-
-        let bar = CALayer()
-        // cgColor resolves a dynamic color against the current appearance, which
-        // outside drawing is the system's; a dark terminal theme on a light system
-        // would get a black bar. Resolve it against the tab button's own appearance.
-        tabButton.effectiveAppearance.performAsCurrentDrawingAppearance {
-            bar.backgroundColor = NSColor.labelColor.withAlphaComponent(0.9).cgColor
-        }
-        // Without it the bar renders beneath the selected-tab pill AppKit draws
-        // on macOS 26 and shows at about half brightness; it cannot live inside
-        // the fill layer for the same reason, since zPosition only orders siblings.
-        bar.zPosition = 100
-
-        let height = Self.activeUnderlineHeight
-        let bounds = tabButton.bounds
-        // The mask has to pin the same edge the bar sits along.
-        bar.frame = tabButton.isFlipped
-            ? CGRect(x: 0, y: bounds.height - height, width: bounds.width, height: height)
-            : CGRect(x: 0, y: 0, width: bounds.width, height: height)
-        bar.autoresizingMask = tabButton.isFlipped
-            ? [.layerWidthSizable, .layerMinYMargin]
-            : [.layerWidthSizable, .layerMaxYMargin]
-        parent.addSublayer(bar)
-
-        activeUnderlineLayer = bar
     }
 
     private var tabSeparatorLayer: CALayer?
