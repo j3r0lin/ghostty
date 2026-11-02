@@ -1313,15 +1313,13 @@ class BaseTerminalController: NSWindowController,
             self.syncFocusToSurfaceTree()
         }
 
-        // The tab bar moves to the new key window. Re-attach progress layers
-        // and update visibility (hide on active tab, show on others).
+        // The tab bar moves to the new key window. Re-attach progress layers.
         DispatchQueue.main.async { [weak self] in
             guard let tabGroup = self?.window?.tabGroup else { return }
             for window in tabGroup.windows {
                 guard let tw = window as? TerminalWindow else { continue }
                 if tw.showTabProgress {
                     tw.reattachTabProgressIfNeeded()
-                    tw.updateTabProgressVisibility()
                 }
                 if tw.tabAgent != nil {
                     tw.reattachTabAgentIconIfNeeded()
@@ -1337,15 +1335,6 @@ class BaseTerminalController: NSWindowController,
     func windowDidResignKey(_ notification: Notification) {
         self.syncFocusToSurfaceTree()
 
-        DispatchQueue.main.async { [weak self] in
-            guard let tabGroup = self?.window?.tabGroup else { return }
-            for window in tabGroup.windows {
-                guard let tw = window as? TerminalWindow else { continue }
-                if tw.showTabProgress {
-                    tw.updateTabProgressVisibility()
-                }
-            }
-        }
     }
 
     func windowDidChangeOcclusionState(_ notification: Notification) {

@@ -87,12 +87,6 @@ class TerminalWindow: NSWindow {
     private var brailleSpinnerView: BrailleSpinnerView?
     private var brailleSpinnerHoverView: AgentIconHoverView?
 
-    /// Callers use this after a key or progress change; the tab backdrop is what
-    /// depends on both, so it is the thing to bring up to date.
-    func updateTabProgressVisibility() {
-        applyActiveTabStyle()
-    }
-
     /// The detected CLI agent for this window's tab icon.
     var tabAgent: CLIAgent? {
         didSet {
@@ -205,9 +199,13 @@ class TerminalWindow: NSWindow {
         }
     }
 
+    /// Idempotent: assigning the same title again would make AppKit rebuild the tab
+    /// button, which calls back into reattach and loops.
     private func applyActiveTabStyle() {
         reattachTabBackdropIfNeeded()
-        tab.attributedTitle = attributedTitle
+        if let title = attributedTitle, !title.isEqual(to: tab.attributedTitle) {
+            tab.attributedTitle = title
+        }
     }
 
     /// A programmatic tab switch changes selectedWindow without touching the key
@@ -237,11 +235,14 @@ class TerminalWindow: NSWindow {
     private var tabBackdropLayer: CALayer?
     private var tabBottomLineLayer: CALayer?
 
-    private static let inactiveTabDim: CGFloat = 0.5
+    /// Light tab bars get a gentler wash: the title stays dark and must remain
+    /// readable on it.
+    private static let inactiveTabBackdropAlphaDark: CGFloat = 0.5
+    private static let inactiveTabBackdropAlphaLight: CGFloat = 0.08
 
     /// Dimmed text for inactive tabs. Dynamic, so it follows the tab button's
     /// appearance rather than the system's.
-    private static let inactiveTabTitleColor = NSColor.labelColor.withAlphaComponent(0.4)
+    private static let inactiveTabTitleColor = NSColor.labelColor.withAlphaComponent(0.5)
 
     private func reattachTabBackdropIfNeeded() {
         guard let tabButton = findOwnTabButton() else { return }
@@ -261,15 +262,23 @@ class TerminalWindow: NSWindow {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
-        tabBackdropLayer?.frame = tabButton.bounds
+        if tabBackdropLayer?.frame != tabButton.bounds {
+            tabBackdropLayer?.frame = tabButton.bounds
+        }
 
+        let color: CGColor
         if isActiveTab {
-            let color = (preferredBackgroundColor ?? .black).withAlphaComponent(1)
-            tabBackdropLayer?.backgroundColor = color.cgColor
+            // Resolve against the button's appearance, not the system's.
+            color = (preferredBackgroundColor ?? .black).withAlphaComponent(1).cgColor
             removeTabBottomLine()
         } else {
-            tabBackdropLayer?.backgroundColor = NSColor.black.withAlphaComponent(Self.inactiveTabDim).cgColor
+            let isDark = tabButton.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            let alpha = isDark ? Self.inactiveTabBackdropAlphaDark : Self.inactiveTabBackdropAlphaLight
+            color = NSColor.black.withAlphaComponent(alpha).cgColor
             attachTabBottomLine(to: tabButton, parent: parent)
+        }
+        if tabBackdropLayer?.backgroundColor != color {
+            tabBackdropLayer?.backgroundColor = color
         }
     }
 
@@ -365,12 +374,11 @@ class TerminalWindow: NSWindow {
     /// after it moves our accessory view into a rebuilt or brand-new tab button.
     func reattachTabDecorationsIfNeeded() {
         guard findOwnTabButton() != nil else { return }
-        reattachTabBackdropIfNeeded()
         reattachTabSeparatorIfNeeded()
         reattachTabUnreadTintIfNeeded()
         reattachTabAgentIconIfNeeded()
         reattachTabProgressIfNeeded()
-        refreshActiveTabDecorations()
+        applyActiveTabStyle()
     }
 
     /// Our accessory view is the only thing we control that AppKit moves into whatever
@@ -711,9 +719,6 @@ class TerminalWindow: NSWindow {
     override func resignMain() {
         super.resignMain()
         viewModel.isMainWindow = false
-        // Fallback for a selection change the KVO never saw: the tab group can
-        // be swapped out from under the observation.
-        refreshActiveTabDecorations()
     }
 
     @discardableResult
