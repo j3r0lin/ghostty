@@ -191,6 +191,12 @@ class TerminalWindow: NSWindow {
 
     private var tabActiveIndicatorLayer: CALayer?
 
+    /// The bar under the active tab. It lives inside the active indicator rather
+    /// than beside it so it can never outlive the fill it belongs to.
+    private var activeUnderlineLayer: CALayer?
+
+    private static let activeUnderlineHeight: CGFloat = 3
+
     func attachTabActiveIndicator() {
         guard !isAttachedToOwnTab(tabActiveIndicatorLayer) else { return }
         removeTabActiveIndicator()
@@ -202,11 +208,48 @@ class TerminalWindow: NSWindow {
         tabButton.wantsLayer = true
         tabButton.layer?.addSublayer(layer)
         tabActiveIndicatorLayer = layer
+
+        attachActiveUnderline(to: tabButton)
     }
 
     func removeTabActiveIndicator() {
         tabActiveIndicatorLayer?.removeFromSuperlayer()
         tabActiveIndicatorLayer = nil
+        activeUnderlineLayer?.removeFromSuperlayer()
+        activeUnderlineLayer = nil
+    }
+
+    /// The active tab is otherwise only a white 8% fill, which reads as the same
+    /// gray as its neighbours; the bar gives the selection an edge the eye lands on.
+    private func attachActiveUnderline(to tabButton: NSView) {
+        guard activeUnderlineLayer == nil, let parent = tabButton.layer else { return }
+
+        let bar = CALayer()
+        // cgColor resolves a dynamic color against the current appearance, which
+        // outside drawing is the system's; a dark terminal theme on a light system
+        // would get a black bar. Resolve it against the tab button's own appearance.
+        tabButton.effectiveAppearance.performAsCurrentDrawingAppearance {
+            bar.backgroundColor = NSColor.labelColor.withAlphaComponent(0.9).cgColor
+        }
+        // On macOS 14 an unselected tab button holds a 45% black overlay view that
+        // AppKit re-adds on some tab bar changes (entering fullscreen, for one). A
+        // plain sublayer ends up above or below it depending on which was added
+        // last, so the same bar showed at full or half brightness from tab to tab.
+        bar.zPosition = 100
+
+        let height = Self.activeUnderlineHeight
+        let bounds = tabButton.bounds
+        // A flipped button measures y from its top edge, so the bottom edge is the
+        // other end; the mask has to pin the same edge the bar sits along.
+        bar.frame = tabButton.isFlipped
+            ? CGRect(x: 0, y: bounds.height - height, width: bounds.width, height: height)
+            : CGRect(x: 0, y: 0, width: bounds.width, height: height)
+        bar.autoresizingMask = tabButton.isFlipped
+            ? [.layerWidthSizable, .layerMinYMargin]
+            : [.layerWidthSizable, .layerMaxYMargin]
+        parent.addSublayer(bar)
+
+        activeUnderlineLayer = bar
     }
 
     private var tabSeparatorLayer: CALayer?
