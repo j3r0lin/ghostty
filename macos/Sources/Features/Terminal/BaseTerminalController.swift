@@ -1334,7 +1334,6 @@ class BaseTerminalController: NSWindowController,
 
     func windowDidResignKey(_ notification: Notification) {
         self.syncFocusToSurfaceTree()
-
     }
 
     func windowDidChangeOcclusionState(_ notification: Notification) {

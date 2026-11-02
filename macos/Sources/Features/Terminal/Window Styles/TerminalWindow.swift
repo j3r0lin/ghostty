@@ -199,8 +199,8 @@ class TerminalWindow: NSWindow {
         }
     }
 
-    /// Idempotent: assigning the same title again would make AppKit rebuild the tab
-    /// button, which calls back into reattach and loops.
+    /// Idempotent because reattach calls it: if reassigning an unchanged title made
+    /// AppKit rebuild the tab button, the rebuild would call reattach again.
     private func applyActiveTabStyle() {
         reattachTabBackdropIfNeeded()
         if let title = attributedTitle, !title.isEqual(to: tab.attributedTitle) {
@@ -268,7 +268,6 @@ class TerminalWindow: NSWindow {
 
         let color: CGColor
         if isActiveTab {
-            // Resolve against the button's appearance, not the system's.
             color = (preferredBackgroundColor ?? .black).withAlphaComponent(1).cgColor
             removeTabBottomLine()
         } else {
